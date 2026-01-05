@@ -54,11 +54,11 @@ const EventDetails: React.FC = () => {
     fetchMeeting();
   }, [id]);
 
-  if (loading) return <div className="pt-32 text-center">Loading event details...</div>;
-  if (!meeting) return <div className="pt-32 text-center">Event not found</div>;
+  if (loading) return <div className="pt-32 text-center dark:text-white">Loading event details...</div>;
+  if (!meeting) return <div className="pt-32 text-center dark:text-white">Event not found</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-20 transition-colors">
         {/* Hero Image */}
         <div className="relative h-[50vh] w-full overflow-hidden">
              <motion.img 
@@ -97,12 +97,12 @@ const EventDetails: React.FC = () => {
                 <motion.div 
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
-                    className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/50"
+                    className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xl shadow-slate-200/50 dark:shadow-none transition-colors"
                 >
-                    <h2 className="text-2xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-                        <Info className="text-blue-600" /> About the Event
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                        <Info className="text-mini-red" /> About the Event
                     </h2>
-                    <p className="text-slate-600 leading-relaxed text-lg">
+                    <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-lg">
                         {meeting.description}
                     </p>
 
@@ -110,9 +110,9 @@ const EventDetails: React.FC = () => {
                     {meeting.custom_data && Object.keys(meeting.custom_data).length > 0 && (
                         <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {Object.entries(meeting.custom_data).map(([key, value]) => (
-                                <div key={key} className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                    <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{key}</span>
-                                    <span className="text-slate-800 font-medium">{String(value)}</span>
+                                <div key={key} className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors">
+                                    <span className="block text-xs font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider mb-1">{key}</span>
+                                    <span className="text-slate-800 dark:text-slate-200 font-medium">{String(value)}</span>
                                 </div>
                             ))}
                         </div>
@@ -124,10 +124,10 @@ const EventDetails: React.FC = () => {
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: 0.1 }}
-                    className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/50"
+                    className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xl shadow-slate-200/50 dark:shadow-none transition-colors"
                 >
-                    <h2 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-                        <Calendar className="text-blue-600" /> Itinerary
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+                        <Calendar className="text-mini-red" /> Itinerary
                     </h2>
                     <Itinerary meetingId={meeting.id} />
                 </motion.div>
@@ -140,14 +140,14 @@ const EventDetails: React.FC = () => {
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ delay: 0.2 }}
-                    className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/50 flex flex-col items-center text-center"
+                    className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xl shadow-slate-200/50 dark:shadow-none flex flex-col items-center text-center transition-colors"
                 >
-                    <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-                        <Map className="text-blue-600" /> Route Map
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                        <Map className="text-mini-red" /> Route Map
                     </h2>
                     {meeting.maps_url ? (
                         <>
-                            <div className="bg-white p-2 rounded-xl border border-slate-100 mb-4">
+                            <div className="bg-white p-2 rounded-xl border border-slate-100 dark:border-slate-700 mb-4">
                                 <div style={{ height: "auto", margin: "0 auto", maxWidth: 128, width: "100%" }}>
                                     <QRCode
                                         size={256}
@@ -157,12 +157,12 @@ const EventDetails: React.FC = () => {
                                     />
                                 </div>
                             </div>
-                            <p className="text-sm text-slate-500 mb-4">Scan to open in Maps</p>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Scan to open in Maps</p>
                             <a 
                                 href={meeting.maps_url} 
                                 target="_blank" 
                                 rel="noreferrer"
-                                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors"
+                                className="w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200 rounded-xl font-semibold transition-colors"
                             >
                                 Open Route
                             </a>

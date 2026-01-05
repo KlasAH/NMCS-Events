@@ -16,7 +16,7 @@ const EventCard: React.FC<EventCardProps> = ({ meeting, index }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.1, duration: 0.4 }}
-      className={`group relative bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300 flex flex-col border-b-4 border-transparent hover:border-mini-red
+      className={`group relative bg-white dark:bg-slate-900 rounded-2xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-300 flex flex-col border-b-4 border-transparent hover:border-mini-red dark:border-slate-800 dark:hover:border-mini-red
         ${index === 0 ? 'md:col-span-2 md:row-span-2' : ''}
       `}
     >
@@ -46,22 +46,22 @@ const EventCard: React.FC<EventCardProps> = ({ meeting, index }) => {
         </div>
       </div>
 
-      <div className="p-5 flex flex-col flex-grow justify-between bg-white">
+      <div className="p-5 flex flex-col flex-grow justify-between bg-white dark:bg-slate-900 transition-colors">
         <div>
-            <div className="flex items-start gap-2 text-slate-500 mb-3 text-sm font-medium">
+            <div className="flex items-start gap-2 text-slate-500 dark:text-slate-400 mb-3 text-sm font-medium">
                 <MapPin size={16} className="mt-0.5 shrink-0 text-mini-red" />
                 <span>{meeting.location_name}</span>
             </div>
-            <p className="text-slate-600 line-clamp-3 text-sm leading-relaxed">
+            <p className="text-slate-600 dark:text-slate-300 line-clamp-3 text-sm leading-relaxed">
                 {meeting.description}
             </p>
         </div>
         
-        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Details</span>
+        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Details</span>
             <Link 
                 to={`/event/${meeting.id}`}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-mini-black text-white group-hover:bg-mini-red transition-all duration-300 transform group-hover:scale-110"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-mini-black dark:bg-white text-white dark:text-black group-hover:bg-mini-red dark:group-hover:bg-mini-red dark:group-hover:text-white transition-all duration-300 transform group-hover:scale-110"
             >
                 <ArrowRight size={18} />
             </Link>

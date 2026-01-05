@@ -4,6 +4,7 @@ import { Meeting } from '../types';
 import EventCard from '../components/EventCard';
 import { motion } from 'framer-motion';
 import { Search, Filter, Star } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 const mockMeetings: Meeting[] = [
     {
@@ -55,6 +56,7 @@ const Home: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');
+  const { currentTheme } = useTheme();
 
   useEffect(() => {
     if (isDemoMode) {
@@ -103,9 +105,6 @@ const Home: React.FC = () => {
     }
 
     // 3. Sort: Pinned first, then Date
-    // If 'all' or 'upcoming', usually prefer closest date first, but pinned stays on top.
-    // If 'past', prefer most recent past date first.
-    
     filtered.sort((a, b) => {
         // Pinned always on top
         if (a.is_pinned && !b.is_pinned) return -1;
@@ -117,8 +116,6 @@ const Home: React.FC = () => {
         if (filterType === 'past') {
             return dateB - dateA; // Newest past event first
         } else {
-             // For upcoming/all, arguably closest date is better, but user asked for 'Latest First' (descending)
-             // in context of a blog/feed. Let's do descending (Newest date first).
              return dateB - dateA;
         }
     });
@@ -128,20 +125,20 @@ const Home: React.FC = () => {
   }, [meetings, searchQuery, filterType]);
 
   return (
-    <div className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+    <div className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto min-h-screen">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="mb-12 text-center"
       >
         {/* Header styling updated for Mini theme */}
-        <div className="inline-block mb-4 p-2 px-4 rounded-full bg-mini-black text-white text-xs font-bold tracking-widest uppercase">
+        <div className="inline-block mb-4 p-2 px-4 rounded-full bg-mini-black dark:bg-white text-white dark:text-black text-xs font-bold tracking-widest uppercase transition-colors">
              Since 2001
         </div>
-        <h1 className="text-4xl md:text-7xl font-black text-slate-900 tracking-tighter mb-4">
-          NMCS <span className="text-transparent bg-clip-text bg-gradient-to-r from-mini-red to-red-600">EVENTS</span>
+        <h1 className="text-4xl md:text-7xl font-black text-slate-900 dark:text-white tracking-tighter mb-4 transition-colors">
+          NMCS <span style={{ color: currentTheme.color }} className="transition-colors duration-500">EVENTS</span>
         </h1>
-        <p className="text-lg text-slate-600 max-w-2xl mx-auto font-medium">
+        <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto font-medium transition-colors">
           The ultimate club for modern Mini enthusiasts. <br className="hidden md:block"/> Rallies, meetups, and track days.
         </p>
       </motion.div>
@@ -151,28 +148,28 @@ const Home: React.FC = () => {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="mb-10 bg-white rounded-2xl shadow-lg shadow-slate-200/50 p-2 flex flex-col md:flex-row gap-2 max-w-4xl mx-auto border border-slate-100"
+        className="mb-10 bg-white dark:bg-slate-900 rounded-2xl shadow-lg shadow-slate-200/50 dark:shadow-none p-2 flex flex-col md:flex-row gap-2 max-w-4xl mx-auto border border-slate-100 dark:border-slate-800 transition-colors"
       >
         <div className="relative flex-grow">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input 
                 type="text" 
                 placeholder="Find a trip..." 
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-mini-red focus:bg-white transition-all outline-none"
+                className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border-none focus:ring-2 focus:ring-mini-red focus:bg-white dark:focus:bg-slate-950 text-slate-900 dark:text-white transition-all outline-none"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
             />
         </div>
         
-        <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
+        <div className="flex bg-slate-100 dark:bg-slate-800 rounded-xl p-1 gap-1 transition-colors">
              {(['all', 'upcoming', 'past'] as const).map((ft) => (
                  <button
                     key={ft}
                     onClick={() => setFilterType(ft)}
                     className={`px-4 py-2 rounded-lg text-sm font-bold capitalize transition-all
                         ${filterType === ft 
-                            ? 'bg-white text-mini-black shadow-sm' 
-                            : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}
+                            ? 'bg-white dark:bg-slate-700 text-mini-black dark:text-white shadow-sm' 
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'}
                     `}
                  >
                      {ft}
@@ -185,13 +182,13 @@ const Home: React.FC = () => {
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-pulse">
             {[1,2,3,4].map(i => (
-                <div key={i} className={`bg-slate-200 rounded-3xl h-64 ${i===1 ? 'md:col-span-2 md:row-span-2' : ''}`}></div>
+                <div key={i} className={`bg-slate-200 dark:bg-slate-800 rounded-3xl h-64 ${i===1 ? 'md:col-span-2 md:row-span-2' : ''}`}></div>
             ))}
         </div>
       ) : (
         <>
             {filteredMeetings.length === 0 ? (
-                <div className="text-center py-20 text-slate-400">
+                <div className="text-center py-20 text-slate-400 dark:text-slate-500">
                     <p className="text-xl font-medium">No events found fitting your criteria.</p>
                     <button 
                         onClick={() => {setFilterType('all'); setSearchQuery('');}}

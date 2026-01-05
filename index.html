@@ -10,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
+        darkMode: 'class',
         theme: {
           extend: {
             fontFamily: {
@@ -18,7 +19,9 @@
             colors: {
               glass: "rgba(255, 255, 255, 0.7)",
               glassBorder: "rgba(255, 255, 255, 0.5)",
-              'mini-red': '#E21D38',
+              // We use CSS variables here so we can change the 'mini-red' 
+              // (which acts as our primary) dynamically via React state
+              'mini-red': 'var(--mini-primary)', 
               'mini-black': '#111111',
               'mini-green': '#003323',
             }
@@ -27,10 +30,16 @@
       }
     </script>
     <style>
+      :root {
+        --mini-primary: #E21D38; /* Default Chili Red */
+      }
       body {
         background-color: #f3f4f6;
         font-family: 'Inter', sans-serif;
         overflow-x: hidden;
+      }
+      .dark body {
+        background-color: #0f172a;
       }
       ::-webkit-scrollbar {
         width: 8px;
@@ -42,19 +51,22 @@
         background-color: #cbd5e1;
         border-radius: 20px;
       }
+      .dark ::-webkit-scrollbar-thumb {
+        background-color: #334155;
+      }
     </style>
   <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.89.0",
-    "react-router-dom": "https://esm.sh/react-router-dom@^7.11.0",
-    "framer-motion": "https://esm.sh/framer-motion@^12.23.26",
+    "react": "https://esm.sh/react@^19.2.3",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "date-fns": "https://esm.sh/date-fns@^4.1.0",
-    "react-qr-code": "https://esm.sh/react-qr-code@^2.0.18"
+    "framer-motion": "https://esm.sh/framer-motion@^12.24.0",
+    "react-qr-code": "https://esm.sh/react-qr-code@^2.0.18",
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.11.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.89.0"
   }
 }
 </script>

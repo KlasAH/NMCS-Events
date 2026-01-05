@@ -67,7 +67,7 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
   if (loading) return <div className="p-4 text-center text-slate-400 animate-pulse">Loading schedule...</div>;
 
   return (
-    <div className="relative border-l-2 border-slate-200 ml-3 space-y-8 py-2">
+    <div className="relative border-l-2 border-slate-200 dark:border-slate-700 ml-3 space-y-8 py-2">
       <AnimatePresence>
         {items.map((item, index) => (
             <motion.div
@@ -77,17 +77,17 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
                 transition={{ delay: index * 0.1 }}
                 className="relative pl-8"
             >
-                <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-white border-4 border-blue-500 shadow-sm" />
+                <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-white dark:bg-slate-900 border-4 border-mini-red shadow-sm" />
                 
                 <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4">
-                    <span className="font-mono font-bold text-blue-600 text-lg flex items-center gap-1 min-w-[80px]">
+                    <span className="font-mono font-bold text-mini-red text-lg flex items-center gap-1 min-w-[80px]">
                         <Clock size={16} />
                         {item.start_time.slice(0, 5)}
                     </span>
                     <div>
-                        <h4 className="font-bold text-slate-800 text-lg">{item.title}</h4>
+                        <h4 className="font-bold text-slate-800 dark:text-slate-100 text-lg">{item.title}</h4>
                         {item.description && (
-                            <p className="text-slate-500 mt-1">{item.description}</p>
+                            <p className="text-slate-500 dark:text-slate-400 mt-1">{item.description}</p>
                         )}
                     </div>
                 </div>

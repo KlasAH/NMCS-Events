@@ -41,37 +41,37 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4 transition-colors">
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100"
+        className="max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl p-8 border border-slate-100 dark:border-slate-800 transition-colors"
       >
         <div className="text-center mb-8">
-            <h2 className="text-3xl font-black text-slate-900 tracking-tight">Board Member Login</h2>
-            <p className="text-slate-500 mt-2 font-medium">Access the administrative dashboard</p>
-            {isDemoMode && <p className="text-xs text-mini-red mt-2 bg-red-50 p-2 rounded font-bold">Demo Mode: Click Sign In to toggle Admin access.</p>}
+            <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">Board Member Login</h2>
+            <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">Access the administrative dashboard</p>
+            {isDemoMode && <p className="text-xs text-mini-red mt-2 bg-red-50 dark:bg-slate-800 p-2 rounded font-bold">Demo Mode: Click Sign In to toggle Admin access.</p>}
         </div>
 
         <form onSubmit={handleLogin} className="space-y-6">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Email</label>
+            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Email</label>
             <input
               type="email"
               required
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white text-slate-900 placeholder:text-slate-400"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="admin@nmcs.com"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Password</label>
+            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Password</label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
                 required
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white text-slate-900 placeholder:text-slate-400 pr-12"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 pr-12"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -79,7 +79,7 @@ const Login: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-mini-black transition-colors focus:outline-none p-1"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-mini-black dark:hover:text-white transition-colors focus:outline-none p-1"
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
@@ -88,7 +88,7 @@ const Login: React.FC = () => {
           </div>
 
           {error && (
-            <div className="text-mini-red text-sm text-center bg-red-50 p-3 rounded-xl font-medium border border-red-100">
+            <div className="text-mini-red text-sm text-center bg-red-50 dark:bg-red-900/20 p-3 rounded-xl font-medium border border-red-100 dark:border-red-900/50">
               {error}
             </div>
           )}
@@ -96,7 +96,7 @@ const Login: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-mini-black text-white rounded-xl font-bold hover:bg-slate-800 transition-colors disabled:opacity-50 shadow-lg shadow-black/20"
+            className="w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors disabled:opacity-50 shadow-lg shadow-black/20"
           >
             {loading ? 'Authenticating...' : 'Sign In'}
           </button>
