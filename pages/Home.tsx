@@ -155,7 +155,7 @@ const Home: React.FC = () => {
                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
 
-                {/* Logo 1: Vectorized Color Copy (Renamed for URL safety) */}
+                {/* Logo 1: Vectorized Color Copy */}
                 <motion.img 
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -179,7 +179,7 @@ const Home: React.FC = () => {
 
             {/* Right Group */}
             <div className="flex items-center gap-4">
-                {/* Logo 2: In Car Badge (Renamed for URL safety) */}
+                {/* Logo 2: In Car Badge */}
                 <motion.img 
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -277,10 +277,10 @@ const Home: React.FC = () => {
             <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-6">Heritage & History</h3>
             
             <div className="flex flex-wrap items-center justify-center gap-12 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
-                 {/* Old Classic Logo */}
+                 {/* Old Classic Logo - Use .jpg */}
                  <div className="flex flex-col items-center gap-2">
                     <img 
-                        src={getAssetUrl('logos/logo_old.png')}
+                        src={getAssetUrl('logos/logo_old.jpg')}
                         className="h-16 w-auto object-contain dark:invert"
                         alt="Classic Mini Heritage"
                     />
@@ -289,10 +289,10 @@ const Home: React.FC = () => {
 
                 <div className="h-10 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block"></div>
 
-                {/* Previous Modern Logo */}
+                {/* Previous Modern Logo - Use .jpg */}
                 <div className="flex flex-col items-center gap-2">
                     <img 
-                        src={getAssetUrl('logos/logo_new.png')}
+                        src={getAssetUrl('logos/logo_new.jpg')}
                         className="h-16 w-auto object-contain dark:invert"
                         alt="Modern Mini Heritage"
                     />

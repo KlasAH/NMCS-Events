@@ -76,7 +76,7 @@ export const MODELS: ThemeConfig[] = [
       name: 'J01 / F66', 
       years: '2024+', 
       color: '#0ea5e9', // Blazing Blue
-      carImageUrl: getAssetUrl('models/j01.png') 
+      carImageUrl: getAssetUrl('models/j01.jpg') // Fixed extension based on screenshot
   },
 ];
 
