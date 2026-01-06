@@ -7,7 +7,7 @@ interface AuthContextType {
   session: Session | null;
   isAdmin: boolean;
   loading: boolean;
-  signIn: (email: string) => Promise<void>; // Simplified for demo
+  signIn: (email: string) => Promise<void>;
   signInWithOAuth: (provider: Provider) => Promise<void>;
   signUp: (email: string, password: string, fullName: string, username: string) => Promise<{ error: any; data: any }>;
   sendPasswordReset: (email: string) => Promise<{ error: any }>;
@@ -50,17 +50,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     try {
-      // Calls a Postgres RPC function named 'is_admin'
       const { data, error } = await supabase.rpc('is_admin');
       if (error || !data) {
-        // Fallback: Check profiles table
         const { data: profileData } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', session.user.id)
             .single();
             
-        // Fallback: Check user_roles table
         const { data: roleData } = await supabase
             .from('user_roles')
             .select('role')
@@ -90,13 +87,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string) => {
-      // Placeholder for email/magic link logic if needed
-  }
+      if (isDemoMode) {
+          // Mock successful login
+          setIsAdmin(true);
+          setSession({ 
+              access_token: 'mock', 
+              token_type: 'bearer', 
+              expires_in: 3600, 
+              refresh_token: 'mock', 
+              user: { 
+                  id: 'mock-user-id', 
+                  aud: 'authenticated', 
+                  role: 'authenticated', 
+                  email: email || 'admin@nmcs.com',
+                  app_metadata: {},
+                  user_metadata: {},
+                  created_at: new Date().toISOString()
+              } 
+          });
+      }
+      // For real mode, signIn is handled via supabase.auth directly in components usually, 
+      // or we could wrap it here.
+  };
 
   const signUp = async (email: string, password: string, fullName: string, username: string) => {
     if (isDemoMode) {
-        alert("Sign Up mocked in Demo Mode");
-        return { error: null, data: {} };
+        // Mock successful signup
+        return { error: null, data: { session: null } }; // Return null session to simulate email verification required
     }
     const { data, error } = await supabase.auth.signUp({
         email,
@@ -104,7 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         options: {
             data: {
                 full_name: fullName,
-                username: username, // Pass username to metadata
+                username: username,
             }
         }
     });
@@ -129,8 +146,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log(`Mock reset email sent to ${email}`);
           return { error: null };
       }
-      // This sends a "Recovery" email to the user
-      // They click the link, and it should redirect them to a page where they can call updatePassword
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: window.location.origin + '/login?recovery=true',
       });
@@ -145,23 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { error };
   }
 
-  // Mock admin toggle for demo purposes
-  const toggleMockAdmin = () => {
-    setIsAdmin(!isAdmin);
-    setSession(isAdmin ? null : { user: { email: 'admin@nmcs.com' } } as any);
-  }
-
-  const value = isDemoMode ? {
-    session,
-    isAdmin,
-    loading,
-    signIn: async () => {},
-    signInWithOAuth: async () => {},
-    signUp: async () => ({error: null, data: {}}),
-    sendPasswordReset: async () => ({error: null}),
-    updatePassword: async () => ({ error: null }),
-    signOut: async () => { toggleMockAdmin() }, 
-  } : {
+  const value = {
     session,
     isAdmin,
     loading,
@@ -183,3 +182,4 @@ export const useAuth = () => {
   }
   return context;
 };
+        
