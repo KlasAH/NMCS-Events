@@ -6,6 +6,7 @@ import EventCard from '../components/EventCard';
 import { motion } from 'framer-motion';
 import { Search } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { useNavigate } from 'react-router-dom';
 
 const mockMeetings: Meeting[] = [
     {
@@ -58,6 +59,10 @@ const Home: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');
   const { currentTheme } = useTheme();
+  
+  // Secret Login Logic
+  const [secretClicks, setSecretClicks] = useState(0);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (isDemoMode) {
@@ -82,6 +87,18 @@ const Home: React.FC = () => {
 
     fetchMeetings();
   }, []);
+
+  // Reset secret clicks if inactive
+  useEffect(() => {
+      let timer: NodeJS.Timeout;
+      if (secretClicks > 0) {
+          timer = setTimeout(() => setSecretClicks(0), 2000); // Reset after 2s of inactivity
+      }
+      if (secretClicks >= 6) {
+          navigate('/login');
+      }
+      return () => clearTimeout(timer);
+  }, [secretClicks, navigate]);
 
   const filteredMeetings = useMemo(() => {
     let filtered = [...meetings];
@@ -302,6 +319,19 @@ const Home: React.FC = () => {
             
             <div className="mt-8 text-slate-400 dark:text-slate-600 text-xs font-medium">
                 &copy; {new Date().getFullYear()} New Mini Club Sweden.
+            </div>
+
+            {/* Secret Admin Login Button */}
+            <div className="mt-8 flex justify-center">
+                <button
+                    onClick={() => setSecretClicks(p => p + 1)}
+                    className={`text-[10px] font-medium transition-colors duration-300 ${
+                        secretClicks > 0 ? 'text-mini-red' : 'text-slate-300 dark:text-slate-700 hover:text-slate-500'
+                    }`}
+                    title="Tryck 6 gånger för att logga in"
+                >
+                    Inloggning för styrelsen
+                </button>
             </div>
         </div>
     </footer>

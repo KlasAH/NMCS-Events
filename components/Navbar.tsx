@@ -18,9 +18,10 @@ const Navbar: React.FC = () => {
   const navItems = [
     { name: t('events'), path: '/', icon: <Home size={18} /> },
     ...(isAdmin ? [{ name: t('admin'), path: '/admin', icon: <Shield size={18} /> }] : []),
+    // Only show Logout if session exists. Public login hidden from navbar.
     ...(session
       ? [{ name: t('logout'), action: signOut, icon: <LogOut size={18} /> }]
-      : [{ name: t('login'), path: '/login', icon: <LogIn size={18} /> }]),
+      : []),
   ];
 
   return (

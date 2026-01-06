@@ -4,12 +4,14 @@ import { supabase, isDemoMode } from '../lib/supabase';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { session, signIn, signInWithOAuth, signUp, sendPasswordReset, updatePassword } = useAuth();
+  const { t } = useLanguage();
   
   // 'login' | 'signup' | 'forgot' | 'reset-confirm'
   const [viewState, setViewState] = useState<'login' | 'signup' | 'forgot' | 'reset-confirm'>('login');
@@ -66,7 +68,7 @@ const Login: React.FC = () => {
             .single();
         
         if (lookupError || !data) {
-            setError("Username not found. Please check your spelling or use your email.");
+            setError(t('userNotFound'));
             setLoading(false);
             return;
         }
@@ -79,10 +81,9 @@ const Login: React.FC = () => {
     });
 
     if (error) {
-      setError(error.message);
+      setError(error.message === "Invalid login credentials" ? t('invalidCreds') : error.message);
       setLoading(false);
     }
-    // No explicit navigate here for real mode either, rely on onAuthStateChange -> session update -> useEffect
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -94,7 +95,7 @@ const Login: React.FC = () => {
         if (!isDemoMode) {
             const { data } = await supabase.from('profiles').select('id').eq('username', username).maybeSingle();
             if (data) {
-                setError("Username is already taken. Please choose another.");
+                setError(t('usernameTaken'));
                 setLoading(false);
                 return;
             }
@@ -105,15 +106,15 @@ const Login: React.FC = () => {
         if (error) {
             setError(error.message);
         } else if (data && data.session) {
-            setSuccessMsg("Registration successful! Logging you in...");
+            setSuccessMsg(t('successReg') + " " + t('processing'));
             // Session update will trigger redirect
         } else {
-            setSuccessMsg("Registration successful! Please check your email to verify your account.");
+            setSuccessMsg(t('successReg') + " " + t('checkEmail'));
             setTimeout(() => setViewState('login'), 5000);
         }
       } catch (err: any) {
          console.error(err);
-         setError(err.message || "An unexpected error occurred during signup.");
+         setError(err.message || t('unexpectedError'));
       } finally {
         setLoading(false);
       }
@@ -128,7 +129,7 @@ const Login: React.FC = () => {
       if (error) {
           setError(error.message);
       } else {
-          setSuccessMsg("If an account exists, a password reset link has been sent to your email.");
+          setSuccessMsg(t('checkEmail'));
       }
       setLoading(false);
   }
@@ -164,16 +165,16 @@ const Login: React.FC = () => {
       >
         <div className="text-center mb-6">
             <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">
-                {viewState === 'login' && 'Member Login'}
-                {viewState === 'signup' && 'Join the Club'}
-                {viewState === 'forgot' && 'Reset Password'}
-                {viewState === 'reset-confirm' && 'New Password'}
+                {viewState === 'login' && t('loginHeader')}
+                {viewState === 'signup' && t('signupHeader')}
+                {viewState === 'forgot' && t('forgotHeader')}
+                {viewState === 'reset-confirm' && t('resetConfirmHeader')}
             </h2>
             <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium text-sm">
-                {viewState === 'login' && 'Access events and administration'}
-                {viewState === 'signup' && 'Create your account to get started'}
-                {viewState === 'forgot' && 'Enter your email to receive a secure link'}
-                {viewState === 'reset-confirm' && 'Enter your new secure password'}
+                {viewState === 'login' && t('loginSub')}
+                {viewState === 'signup' && t('signupSub')}
+                {viewState === 'forgot' && t('forgotSub')}
+                {viewState === 'reset-confirm' && t('resetConfirmSub')}
             </p>
         </div>
 
@@ -200,7 +201,7 @@ const Login: React.FC = () => {
                 {viewState === 'signup' && (
                     <>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Full Name</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('fullName')}</label>
                         <div className="relative">
                             <input
                             type="text"
@@ -214,7 +215,7 @@ const Login: React.FC = () => {
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Username</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('username')}</label>
                         <div className="relative">
                             <input
                             type="text"
@@ -228,7 +229,7 @@ const Login: React.FC = () => {
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Email</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('email')}</label>
                         <div className="relative">
                             <input
                             type="email"
@@ -246,7 +247,7 @@ const Login: React.FC = () => {
 
                 {(viewState === 'login' || viewState === 'forgot') && (
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Email or Username</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('emailOrUsername')}</label>
                         <div className="relative">
                             <input
                             type="text"
@@ -254,7 +255,7 @@ const Login: React.FC = () => {
                             className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                             value={identifier}
                             onChange={(e) => setIdentifier(e.target.value)}
-                            placeholder="username or email@address.com"
+                            placeholder={t('emailOrUsernamePlaceholder')}
                             />
                             <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                         </div>
@@ -264,10 +265,10 @@ const Login: React.FC = () => {
                 {(viewState === 'login' || viewState === 'signup' || viewState === 'reset-confirm') && (
                     <div>
                         <div className="flex justify-between items-center mb-1">
-                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Password</label>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">{t('password')}</label>
                             {viewState === 'login' && (
                                 <button type="button" onClick={() => setViewState('forgot')} className="text-xs font-bold text-mini-red hover:underline">
-                                    Forgot?
+                                    {t('forgotBtn')}
                                 </button>
                             )}
                         </div>
@@ -305,14 +306,14 @@ const Login: React.FC = () => {
                             onClick={() => { setViewState('login'); setError(null); }}
                             className="w-full py-3.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl font-bold transition-all"
                          >
-                            Already have an account? Log In
+                            {t('hasAccount')}
                          </button>
                          <button
                             type="submit"
                             disabled={loading}
                             className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-all shadow-xl shadow-black/10 disabled:opacity-50"
                          >
-                            {loading ? 'Creating Account...' : 'Create Account'}
+                            {loading ? t('creatingAccount') : t('createAccount')}
                          </button>
                      </div>
                 ) : (
@@ -321,9 +322,9 @@ const Login: React.FC = () => {
                         disabled={loading}
                         className="w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors disabled:opacity-50 shadow-lg shadow-black/20 flex items-center justify-center gap-2"
                     >
-                        {loading ? 'Processing...' : (
-                            viewState === 'login' ? <>Sign In <ArrowRight size={18}/></> :
-                            viewState === 'forgot' ? 'Send Reset Link' : 'Update Password'
+                        {loading ? t('processing') : (
+                            viewState === 'login' ? <>{t('signIn')} <ArrowRight size={18}/></> :
+                            viewState === 'forgot' ? t('sendResetLink') : t('updatePassword')
                         )}
                     </button>
                 )}
@@ -333,12 +334,12 @@ const Login: React.FC = () => {
 
         {viewState === 'login' && (
              <div className="mt-6 text-center">
-                 <p className="text-sm text-slate-500">Don't have an account?</p>
+                 <p className="text-sm text-slate-500">{t('noAccount')}</p>
                  <button 
                     onClick={() => { setViewState('signup'); setIdentifier(''); setPassword(''); }}
                     className="text-mini-red font-bold hover:underline mt-1"
                  >
-                     Register Now
+                     {t('registerNow')}
                  </button>
              </div>
         )}
@@ -349,7 +350,7 @@ const Login: React.FC = () => {
                     onClick={() => { setViewState('login'); setSuccessMsg(null); setError(null); }}
                     className="text-slate-500 font-bold hover:text-slate-800 dark:hover:text-white text-sm"
                  >
-                     Back to Login
+                     {t('backToLogin')}
                  </button>
              </div>
         )}
@@ -359,7 +360,7 @@ const Login: React.FC = () => {
             <>
                 <div className="my-6 flex items-center gap-4">
                     <div className="h-px bg-slate-100 dark:bg-slate-800 flex-grow" />
-                    <span className="text-xs font-bold text-slate-400 uppercase">Or</span>
+                    <span className="text-xs font-bold text-slate-400 uppercase">{t('or')}</span>
                     <div className="h-px bg-slate-100 dark:bg-slate-800 flex-grow" />
                 </div>
 
@@ -387,4 +388,3 @@ const Login: React.FC = () => {
 };
 
 export default Login;
-        
