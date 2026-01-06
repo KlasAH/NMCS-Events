@@ -133,8 +133,8 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
                                         </div>
                                     </div>
 
-                                    {/* Info Button - Appears if location details exist or description is long */}
-                                    {(item.location_details || item.description) && (
+                                    {/* Info Button - Only appears if location details OR map url exist. Description is already shown inline. */}
+                                    {(item.location_details || item.location_map_url) && (
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); setSelectedItem(item); }}
                                             className="ml-2 p-2 bg-slate-100 dark:bg-slate-700 text-mini-red hover:bg-mini-red hover:text-white rounded-full transition-all shadow-sm shrink-0"
