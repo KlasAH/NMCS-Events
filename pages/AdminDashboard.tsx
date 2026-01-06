@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem } from '../types';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -33,7 +33,7 @@ const generateMockTransactions = (eventId: string): Transaction[] => {
 };
 
 const AdminDashboard: React.FC = () => {
-  const { isAdmin, loading, updatePassword, sendPasswordReset } = useAuth();
+  const { isAdmin, loading, session, signOut, updatePassword, sendPasswordReset } = useAuth();
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings'>('overview');
   
@@ -79,7 +79,9 @@ const AdminDashboard: React.FC = () => {
         if(data) setEvents(data);
     };
 
-    fetchEvents();
+    if (isAdmin) {
+        fetchEvents();
+    }
 
     if (selectedEventId) {
         if (activeTab === 'registrations') {
@@ -89,17 +91,68 @@ const AdminDashboard: React.FC = () => {
         }
     }
     // Fetch Users if in Settings
-    if (activeTab === 'settings' && !isDemoMode) {
+    if (activeTab === 'settings' && !isDemoMode && isAdmin) {
         const fetchUsers = async () => {
             const { data } = await supabase.from('profiles').select('*').limit(20);
             if (data) setUsers(data);
         }
         fetchUsers();
     }
-  }, [selectedEventId, activeTab]);
+  }, [selectedEventId, activeTab, isAdmin]);
 
-  if (loading) return null;
-  if (!isAdmin) return <Navigate to="/login" replace />;
+  if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
+  
+  // 1. Not Logged In
+  if (!session) return <Navigate to="/login" replace />;
+
+  // 2. Logged In, but Not Admin/Board
+  if (!isAdmin) {
+      return (
+        <div className="min-h-screen pt-32 px-4 bg-slate-50 dark:bg-slate-950 flex flex-col items-center text-center transition-colors">
+             <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="max-w-xl w-full bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-xl border border-red-100 dark:border-red-900/30"
+             >
+                <div className="w-16 h-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6 text-mini-red">
+                    <Lock size={32} />
+                </div>
+                <h1 className="text-3xl font-black text-slate-900 dark:text-white mb-2">Restricted Access</h1>
+                <p className="text-slate-600 dark:text-slate-300 mb-6 text-lg">
+                    This dashboard is reserved for <span className="font-bold text-mini-black dark:text-white">NMCS Board Members</span>.
+                </p>
+                <div className="bg-slate-50 dark:bg-slate-800 p-6 rounded-xl text-left text-sm text-slate-600 dark:text-slate-400 mb-8 border border-slate-100 dark:border-slate-700">
+                    <p className="font-bold mb-3 flex items-center gap-2 text-slate-900 dark:text-white text-base">
+                        <UserCog size={18}/> Board Member Setup:
+                    </p>
+                    <p className="mb-2">To grant access, you must update the user's role in the database:</p>
+                    <ol className="list-decimal ml-5 space-y-2 marker:text-mini-red marker:font-bold">
+                        <li>Go to <strong>Supabase Dashboard</strong> &gt; <strong>Table Editor</strong></li>
+                        <li>Open the <code>profiles</code> table</li>
+                        <li>Find the user row (check email or username)</li>
+                        <li>Change the <code>role</code> column to <code>board</code> or <code>admin</code></li>
+                        <li>Click <strong>Save</strong></li>
+                    </ol>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <button 
+                        onClick={() => window.location.reload()}
+                        className="px-6 py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity shadow-lg"
+                    >
+                        Check Access Again
+                    </button>
+                    <button 
+                        onClick={signOut}
+                        className="px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                        <LogOut size={18} /> Log Out
+                    </button>
+                </div>
+             </motion.div>
+        </div>
+      );
+  }
 
   const handleSettingChange = (key: string, value: any) => {
       setGlobalSettings(prev => ({...prev, [key]: value}));
@@ -197,7 +250,7 @@ const AdminDashboard: React.FC = () => {
     <div className="pt-24 pb-12 px-4 max-w-7xl mx-auto min-h-screen">
       <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Admin Dashboard</h1>
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white">Board Member Dashboard</h1>
             <p className="text-slate-500 dark:text-slate-400">Manage NMCS events, registrations, and finances.</p>
         </div>
         {activeTab === 'overview' && !isEditingEvent && (
@@ -567,7 +620,6 @@ const AdminDashboard: React.FC = () => {
                     {/* 3. FINANCES TAB */}
                     {activeTab === 'finances' && (
                         <div className="space-y-6">
-                            {/* ... (Same as before, abbreviated for brevity as focus is on Event Editor) ... */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
                                 <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-100 dark:border-green-800">
                                     <p className="text-xs text-green-700 dark:text-green-400 font-bold uppercase">Income</p>
@@ -629,13 +681,13 @@ const AdminDashboard: React.FC = () => {
                             {/* User Management Section */}
                             <div className="mb-8 p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
-                                    <UserCog size={18} className="text-slate-600 dark:text-slate-300"/> User Management (Master Admin)
+                                    <UserCog size={18} className="text-slate-600 dark:text-slate-300"/> Board Access Management
                                 </h3>
                                 
                                 <div className="flex gap-2 mb-4">
                                     <input 
                                         type="email"
-                                        placeholder="Enter user email address"
+                                        placeholder="Enter member email address"
                                         value={adminResetEmail}
                                         onChange={(e) => setAdminResetEmail(e.target.value)}
                                         className="flex-grow px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"

@@ -9,7 +9,7 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string) => Promise<void>; // Simplified for demo
   signInWithOAuth: (provider: Provider) => Promise<void>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: any; data: any }>;
+  signUp: (email: string, password: string, fullName: string, username: string) => Promise<{ error: any; data: any }>;
   sendPasswordReset: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Placeholder for email/magic link logic if needed
   }
 
-  const signUp = async (email: string, password: string, fullName: string) => {
+  const signUp = async (email: string, password: string, fullName: string, username: string) => {
     if (isDemoMode) {
         alert("Sign Up mocked in Demo Mode");
         return { error: null, data: {} };
@@ -104,6 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         options: {
             data: {
                 full_name: fullName,
+                username: username, // Pass username to metadata
             }
         }
     });

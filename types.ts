@@ -106,6 +106,7 @@ export interface Transaction {
 export interface UserProfile {
   id: string;
   email: string;
+  username?: string; // New: Added username
   role: 'admin' | 'user' | 'board';
   car_model?: string; // New: Selected model preference
 }

@@ -4,7 +4,7 @@ import { supabase, isDemoMode } from '../lib/supabase';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
-import { Eye, EyeOff, Apple, Mail, User, ArrowRight, KeyRound, CheckCircle } from 'lucide-react';
+import { Eye, EyeOff, Apple, Mail, User, ArrowRight, KeyRound, CheckCircle, AtSign } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -14,7 +14,10 @@ const Login: React.FC = () => {
   // 'login' | 'signup' | 'forgot' | 'reset-confirm'
   const [viewState, setViewState] = useState<'login' | 'signup' | 'forgot' | 'reset-confirm'>('login');
   
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState(''); // Email or Username
+  const [username, setUsername] = useState(''); // For Signup only
+  const [email, setEmail] = useState(''); // For Signup only
+  
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -44,8 +47,26 @@ const Login: React.FC = () => {
         return;
     }
 
+    let signInEmail = identifier;
+
+    // Logic: Check if identifier is an email (contains @). If not, assume it's a username and lookup email.
+    if (!identifier.includes('@')) {
+        const { data, error: lookupError } = await supabase
+            .from('profiles')
+            .select('email')
+            .eq('username', identifier)
+            .single();
+        
+        if (lookupError || !data) {
+            setError("Username not found. Please check your spelling or use your email.");
+            setLoading(false);
+            return;
+        }
+        signInEmail = data.email;
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: signInEmail,
       password,
     });
 
@@ -62,12 +83,31 @@ const Login: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const { error } = await signUp(email, password, fullName);
+      // Enforce username uniqueness before trying to auth (optional but good UX)
+      if (!isDemoMode) {
+          const { data } = await supabase.from('profiles').select('id').eq('username', username).single();
+          if (data) {
+              setError("Username is already taken. Please choose another.");
+              setLoading(false);
+              return;
+          }
+      }
+
+      const { data, error } = await signUp(email, password, fullName, username);
+      
       if (error) {
           setError(error.message);
+      } else if (data && data.session) {
+          // If a session is returned immediately, Email Confirmation is DISABLED in Supabase.
+          // We can log the user in directly.
+          setSuccessMsg("Registration successful! Logging you in...");
+          setTimeout(() => {
+              navigate('/admin');
+          }, 1500);
       } else {
+          // No session returned, meaning Email Confirmation is ENABLED.
           setSuccessMsg("Registration successful! Please check your email to verify your account.");
-          setTimeout(() => setViewState('login'), 3000);
+          setTimeout(() => setViewState('login'), 5000);
       }
       setLoading(false);
   }
@@ -77,7 +117,7 @@ const Login: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const { error } = await sendPasswordReset(email);
+      const { error } = await sendPasswordReset(identifier);
       if (error) {
           setError(error.message);
       } else {
@@ -151,6 +191,7 @@ const Login: React.FC = () => {
                 >
                 
                 {viewState === 'signup' && (
+                    <>
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Full Name</label>
                         <div className="relative">
@@ -165,9 +206,20 @@ const Login: React.FC = () => {
                             <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                         </div>
                     </div>
-                )}
-
-                {(viewState !== 'reset-confirm') && (
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Username</label>
+                        <div className="relative">
+                            <input
+                            type="text"
+                            required
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                            placeholder="minicooper_fan"
+                            />
+                            <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        </div>
+                    </div>
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Email</label>
                         <div className="relative">
@@ -180,6 +232,24 @@ const Login: React.FC = () => {
                             placeholder="admin@nmcs.com"
                             />
                             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        </div>
+                    </div>
+                    </>
+                )}
+
+                {(viewState === 'login' || viewState === 'forgot') && (
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Email or Username</label>
+                        <div className="relative">
+                            <input
+                            type="text"
+                            required
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                            value={identifier}
+                            onChange={(e) => setIdentifier(e.target.value)}
+                            placeholder="username or email@address.com"
+                            />
+                            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                         </div>
                     </div>
                 )}
@@ -240,7 +310,7 @@ const Login: React.FC = () => {
              <div className="mt-6 text-center">
                  <p className="text-sm text-slate-500">Don't have an account?</p>
                  <button 
-                    onClick={() => setViewState('signup')}
+                    onClick={() => { setViewState('signup'); setIdentifier(''); setPassword(''); }}
                     className="text-mini-red font-bold hover:underline mt-1"
                  >
                      Register Now
