@@ -1,12 +1,12 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
 import { Meeting, ExtraInfoSection, MapConfig } from '../types';
 import Itinerary from '../components/Itinerary';
 import Modal from '../components/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink, Download } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { format } from 'date-fns';
 import { useLanguage } from '../context/LanguageContext';
@@ -22,6 +22,7 @@ const mockDetailMeeting: Meeting = {
     location_name: 'Swiss Alps, Zurich Start',
     description: 'Our annual flagship event traversing the most scenic passes in the Alps. Prepare for 3 days of spirited driving, luxury accommodation, and fine dining. Limited to 30 cars.',
     cover_image_url: 'https://picsum.photos/seed/alpine/1920/1080',
+    pdf_url: 'pdf/alpine_guide.pdf',
     maps_config: [
         { groupName: 'Day 1', label: 'Zurich to Andermatt', url: 'https://goo.gl/maps/day1' },
         { groupName: 'Day 1', label: 'Lunch Stop', url: 'https://goo.gl/maps/lunch1' },
@@ -174,13 +175,25 @@ const EventDetails: React.FC = () => {
                     >
                         {meeting.title}
                     </motion.h1>
-                    <div className="flex flex-wrap items-center gap-6 text-white/90 text-sm md:text-base font-medium">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 text-white/90 text-sm md:text-base font-medium">
                         <span className="flex items-center gap-2">
                             <Calendar size={18} className="text-mini-red" /> 
                             {format(new Date(meeting.date), 'MMM do', {locale: dateLocale})} 
                             {meeting.end_date && ` - ${format(new Date(meeting.end_date), 'MMM do, yyyy', {locale: dateLocale})}`}
                         </span>
                         <span className="flex items-center gap-2"><MapPin size={18} className="text-mini-red" /> {meeting.location_name}</span>
+                        
+                        {/* PDF Download Button */}
+                        {meeting.pdf_url && (
+                            <a 
+                                href={getAssetUrl(meeting.pdf_url)} 
+                                target="_blank" 
+                                rel="noreferrer"
+                                className="flex items-center gap-2 bg-mini-red text-white px-4 py-2 rounded-lg font-bold hover:bg-red-700 transition-colors shadow-lg w-fit"
+                            >
+                                <Download size={18} /> {t('download')} PDF
+                            </a>
+                        )}
                     </div>
                  </div>
              </div>

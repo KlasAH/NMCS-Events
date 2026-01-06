@@ -59,6 +59,7 @@ export interface Meeting {
   location_name: string;
   description: string;
   cover_image_url: string;
+  pdf_url?: string; // New: Link to PDF in storage
   maps_config?: MapConfig[]; 
   is_pinned?: boolean;
   hotel_info?: HotelDetails;

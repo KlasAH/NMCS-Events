@@ -126,17 +126,18 @@ const Home: React.FC = () => {
   }, [meetings, searchQuery, filterType]);
 
   return (
-    <div className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto min-h-screen overflow-x-hidden">
+    <div className="flex flex-col min-h-screen">
+    <div className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full flex-grow overflow-x-hidden">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="mb-12 text-center relative"
       >
-         <div className="inline-block mb-4 p-2 px-4 rounded-full bg-mini-black dark:bg-white text-white dark:text-black text-xs font-bold tracking-widest uppercase transition-colors">
-            Since 2001
+         <div className="inline-block mb-4 p-2 px-4 rounded-full bg-mini-black dark:bg-white text-white dark:text-black text-xs font-bold tracking-widest uppercase transition-colors shadow-lg">
+            Est. 2001
         </div>
 
-        {/* Header Layout: [Car] [Old Logo] [Title] [New Logo] [Car] */}
+        {/* Header Layout: [Car] [New Color Logo] [Title] [New Badge Logo] [Car] */}
         <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8">
             
             {/* Left Group */}
@@ -154,38 +155,38 @@ const Home: React.FC = () => {
                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
 
-                {/* Logo Old */}
+                {/* Logo 1: Vectorized Color Copy (Renamed for URL safety) */}
                 <motion.img 
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.2 }}
-                    src={getAssetUrl('logos/logo_old.png')}
-                    className="h-12 md:h-20 w-auto object-contain dark:invert transition-all"
-                    alt="Classic Mini Logo"
+                    src={getAssetUrl('logos/nmcs-logo-color.png')} 
+                    className="h-16 md:h-24 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
+                    alt="NMCS Club Logo"
                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
             </div>
 
             {/* Center Title */}
-            <div className="flex flex-col items-center mx-2">
-                <h1 className="text-4xl md:text-7xl font-black text-slate-900 dark:text-white tracking-tighter transition-colors">
-                    NMCS <span style={{ color: currentTheme.color }} className="transition-colors duration-500">EVENTS</span>
+            <div className="flex flex-col items-center mx-2 z-10">
+                <h1 className="text-4xl md:text-7xl font-black text-slate-900 dark:text-white tracking-tighter transition-colors text-center leading-none">
+                    NMCS <span style={{ color: currentTheme.color }} className="transition-colors duration-500 block md:inline">EVENTS</span>
                 </h1>
-                <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto font-medium transition-colors mt-2">
+                <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto font-medium transition-colors mt-3">
                     The ultimate club for modern Mini enthusiasts.
                 </p>
             </div>
 
             {/* Right Group */}
             <div className="flex items-center gap-4">
-                {/* Logo New */}
+                {/* Logo 2: In Car Badge (Renamed for URL safety) */}
                 <motion.img 
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.3 }}
-                    src={getAssetUrl('logos/logo_new.png')}
-                    className="h-12 md:h-20 w-auto object-contain dark:invert transition-all"
-                    alt="Modern Mini Logo"
+                    src={getAssetUrl('logos/nmcs-badge.png')}
+                    className="h-16 md:h-24 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
+                    alt="NMCS Badge"
                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
 
@@ -268,6 +269,42 @@ const Home: React.FC = () => {
             )}
         </>
       )}
+    </div>
+
+    {/* Footer / Heritage Section */}
+    <footer className="w-full bg-slate-100 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 mt-12 py-10 transition-colors">
+        <div className="max-w-7xl mx-auto px-4 text-center">
+            <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-6">Heritage & History</h3>
+            
+            <div className="flex flex-wrap items-center justify-center gap-12 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
+                 {/* Old Classic Logo */}
+                 <div className="flex flex-col items-center gap-2">
+                    <img 
+                        src={getAssetUrl('logos/logo_old.png')}
+                        className="h-16 w-auto object-contain dark:invert"
+                        alt="Classic Mini Heritage"
+                    />
+                    <span className="text-[10px] font-bold text-slate-400">Classic</span>
+                </div>
+
+                <div className="h-10 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block"></div>
+
+                {/* Previous Modern Logo */}
+                <div className="flex flex-col items-center gap-2">
+                    <img 
+                        src={getAssetUrl('logos/logo_new.png')}
+                        className="h-16 w-auto object-contain dark:invert"
+                        alt="Modern Mini Heritage"
+                    />
+                    <span className="text-[10px] font-bold text-slate-400">Modern Era</span>
+                </div>
+            </div>
+            
+            <div className="mt-8 text-slate-400 dark:text-slate-600 text-xs font-medium">
+                &copy; {new Date().getFullYear()} New Mini Club Sweden.
+            </div>
+        </div>
+    </footer>
     </div>
   );
 };

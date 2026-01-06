@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, getAssetUrl } from '../lib/supabase';
 
-export type MiniModel = 'r53' | 'r56' | 'f56' | 'f56lci' | 'f54' | 'f54lci' | 'j01';
+export type MiniModel = 'r53' | 'r52' | 'r56' | 'r55' | 'f56' | 'f56lci' | 'f54' | 'f54lci' | 'j01';
 
 interface ThemeConfig {
   id: MiniModel;
@@ -23,11 +23,25 @@ export const MODELS: ThemeConfig[] = [
       carImageUrl: getAssetUrl('models/r53.png')
   },
   { 
+      id: 'r52', 
+      name: 'R52 Convertible', 
+      years: '2004-2008', 
+      color: '#0ea5e9', // Cool Blue / Sky Blue
+      carImageUrl: getAssetUrl('models/r52.png')
+  },
+  { 
       id: 'r56', 
       name: 'R56', 
       years: '2006-2013', 
       color: '#FCD34D', // Mellow Yellow
       carImageUrl: getAssetUrl('models/r56.png')
+  },
+  { 
+      id: 'r55', 
+      name: 'R55 Clubman', 
+      years: '2007-2014', 
+      color: '#b45309', // Hot Chocolate / Bronze
+      carImageUrl: getAssetUrl('models/r55.png')
   },
   { 
       id: 'f56', 
