@@ -1,9 +1,10 @@
+
 import React, { useEffect, useState, useMemo } from 'react';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
 import { Meeting } from '../types';
 import EventCard from '../components/EventCard';
 import { motion } from 'framer-motion';
-import { Search, Filter, Star } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 const mockMeetings: Meeting[] = [
@@ -125,22 +126,83 @@ const Home: React.FC = () => {
   }, [meetings, searchQuery, filterType]);
 
   return (
-    <div className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto min-h-screen">
+    <div className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto min-h-screen overflow-x-hidden">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mb-12 text-center"
+        className="mb-12 text-center relative"
       >
-        {/* Header styling updated for Mini theme */}
-        <div className="inline-block mb-4 p-2 px-4 rounded-full bg-mini-black dark:bg-white text-white dark:text-black text-xs font-bold tracking-widest uppercase transition-colors">
-             Since 2001
+         <div className="inline-block mb-4 p-2 px-4 rounded-full bg-mini-black dark:bg-white text-white dark:text-black text-xs font-bold tracking-widest uppercase transition-colors">
+            Since 2001
         </div>
-        <h1 className="text-4xl md:text-7xl font-black text-slate-900 dark:text-white tracking-tighter mb-4 transition-colors">
-          NMCS <span style={{ color: currentTheme.color }} className="transition-colors duration-500">EVENTS</span>
-        </h1>
-        <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto font-medium transition-colors">
-          The ultimate club for modern Mini enthusiasts. <br className="hidden md:block"/> Rallies, meetups, and track days.
-        </p>
+
+        {/* Header Layout: [Car] [Old Logo] [Title] [New Logo] [Car] */}
+        <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8">
+            
+            {/* Left Group */}
+            <div className="flex items-center gap-4">
+                {/* Left Car (Theme) */}
+                <motion.img 
+                    key={`left-${currentTheme.id}`}
+                    initial={{ opacity: 0, x: -50 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.5 }}
+                    src={currentTheme.carImageUrl} 
+                    className="w-24 md:w-32 h-auto hidden lg:block opacity-80 transition-all object-contain"
+                    style={{ filter: `drop-shadow(0 0 10px ${currentTheme.color}30)` }}
+                    alt={`${currentTheme.name} Left`}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+
+                {/* Logo Old */}
+                <motion.img 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.2 }}
+                    src={getAssetUrl('logos/logo_old.png')}
+                    className="h-12 md:h-20 w-auto object-contain dark:invert transition-all"
+                    alt="Classic Mini Logo"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+            </div>
+
+            {/* Center Title */}
+            <div className="flex flex-col items-center mx-2">
+                <h1 className="text-4xl md:text-7xl font-black text-slate-900 dark:text-white tracking-tighter transition-colors">
+                    NMCS <span style={{ color: currentTheme.color }} className="transition-colors duration-500">EVENTS</span>
+                </h1>
+                <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto font-medium transition-colors mt-2">
+                    The ultimate club for modern Mini enthusiasts.
+                </p>
+            </div>
+
+            {/* Right Group */}
+            <div className="flex items-center gap-4">
+                {/* Logo New */}
+                <motion.img 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.3 }}
+                    src={getAssetUrl('logos/logo_new.png')}
+                    className="h-12 md:h-20 w-auto object-contain dark:invert transition-all"
+                    alt="Modern Mini Logo"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+
+                {/* Right Car (Theme) */}
+                <motion.img 
+                    key={`right-${currentTheme.id}`}
+                    initial={{ opacity: 0, x: 50 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.5 }}
+                    src={currentTheme.carImageUrl} 
+                    className="w-24 md:w-32 h-auto hidden lg:block opacity-80 scale-x-[-1] transition-all object-contain"
+                    style={{ filter: `drop-shadow(0 0 10px ${currentTheme.color}30)` }}
+                    alt={`${currentTheme.name} Right`}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+            </div>
+        </div>
       </motion.div>
 
       {/* Controls Bar */}
