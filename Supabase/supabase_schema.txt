@@ -13,28 +13,25 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- MIGRATION HELPERS: Ensure columns exist if table was already created
+-- MIGRATION HELPERS
 DO $$ 
 BEGIN 
     BEGIN
         ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
     EXCEPTION
-        WHEN duplicate_column THEN RAISE NOTICE 'username column already exists in profiles.';
+        WHEN duplicate_column THEN RAISE NOTICE 'username column already exists';
     END;
-    
     BEGIN
         ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
     EXCEPTION
-        WHEN duplicate_column THEN RAISE NOTICE 'full_name column already exists in profiles.';
+        WHEN duplicate_column THEN RAISE NOTICE 'full_name column already exists';
     END;
-
     BEGIN
         ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT DEFAULT 'r53';
     EXCEPTION
-        WHEN duplicate_column THEN RAISE NOTICE 'car_model column already exists in profiles.';
+        WHEN duplicate_column THEN RAISE NOTICE 'car_model column already exists';
     END;
 END $$;
-
 
 -- 2. MEETINGS TABLE
 CREATE TABLE IF NOT EXISTS public.meetings (
@@ -55,7 +52,7 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   extra_info JSONB DEFAULT '[]'::jsonb
 );
 
--- 3. ITINERARY ITEMS TABLE
+-- 3. ITINERARY ITEMS
 CREATE TABLE IF NOT EXISTS public.itinerary_items (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -68,7 +65,7 @@ CREATE TABLE IF NOT EXISTS public.itinerary_items (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 4. REGISTRATIONS TABLE
+-- 4. REGISTRATIONS
 CREATE TABLE IF NOT EXISTS public.registrations (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -82,7 +79,7 @@ CREATE TABLE IF NOT EXISTS public.registrations (
   registered_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 5. TRANSACTIONS TABLE
+-- 5. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS public.transactions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -101,7 +98,7 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
   UNIQUE(user_id)
 );
 
--- 7. STORAGE BUCKET SETUP
+-- 7. STORAGE
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('nmcs-assets', 'nmcs-assets', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
@@ -119,10 +116,24 @@ EXCEPTION
     WHEN others THEN NULL;
 END $$;
 
--- CLEANUP OLD POLICIES
+-- HELPER: IS_ADMIN
+-- CRITICAL: SECURITY DEFINER allows this function to bypass RLS, avoiding infinite recursion loops
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'board')
+  ) OR EXISTS (
+    SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role IN ('admin', 'board')
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- CLEANUP OLD POLICIES (Comprehensive)
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
 DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Public meetings are viewable by everyone" ON public.meetings;
 DROP POLICY IF EXISTS "Admins can insert meetings" ON public.meetings;
 DROP POLICY IF EXISTS "Admins can update meetings" ON public.meetings;
@@ -136,29 +147,12 @@ DROP POLICY IF EXISTS "Admins can update registrations" ON public.registrations;
 DROP POLICY IF EXISTS "Admins can manage transactions" ON public.transactions;
 DROP POLICY IF EXISTS "Users can read own role" ON public.user_roles;
 DROP POLICY IF EXISTS "Admins can manage roles" ON public.user_roles;
-DROP POLICY IF EXISTS "Public Access" ON storage.objects;
-DROP POLICY IF EXISTS "Auth Upload" ON storage.objects;
-DROP POLICY IF EXISTS "Auth Update" ON storage.objects;
-DROP POLICY IF EXISTS "Auth Delete" ON storage.objects;
-
--- HELPER: IS_ADMIN
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'board')
-  ) OR EXISTS (
-    SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role IN ('admin', 'board')
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- POLICIES
 
 -- Profiles
 CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
--- Allow users to insert their own profile (Critical for the 'upsert' logic in UserProfile.tsx)
 CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- Meetings
@@ -180,23 +174,29 @@ CREATE POLICY "Admins can update registrations" ON public.registrations FOR UPDA
 -- Transactions
 CREATE POLICY "Admins can manage transactions" ON public.transactions FOR ALL USING (is_admin());
 
+-- User Roles
+CREATE POLICY "Users can read own role" ON public.user_roles FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Admins can manage roles" ON public.user_roles FOR ALL USING (is_admin());
+
 -- Storage Policies
+DROP POLICY IF EXISTS "Public Access" ON storage.objects;
+DROP POLICY IF EXISTS "Auth Upload" ON storage.objects;
+DROP POLICY IF EXISTS "Auth Update" ON storage.objects;
+DROP POLICY IF EXISTS "Auth Delete" ON storage.objects;
+
 CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING ( bucket_id = 'nmcs-assets' );
 CREATE POLICY "Auth Upload" ON storage.objects FOR INSERT WITH CHECK ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Update" ON storage.objects FOR UPDATE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Delete" ON storage.objects FOR DELETE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 
--- TRIGGER: HANDLE NEW USER (Updated to be more robust)
+-- TRIGGER: HANDLE NEW USER
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   extracted_username TEXT;
   extracted_fullname TEXT;
 BEGIN
-  -- Try to get username from metadata, fallback to email prefix
   extracted_username := COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
-  
-  -- Try to get full name, fallback to 'New User'
   extracted_fullname := COALESCE(new.raw_user_meta_data->>'full_name', 'New User');
 
   INSERT INTO public.profiles (id, email, full_name, username, role)
@@ -216,7 +216,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Re-create the trigger to ensure it uses the updated function
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
