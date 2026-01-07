@@ -6,6 +6,7 @@ import Home from './pages/Home';
 import EventDetails from './pages/EventDetails';
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
+import UserProfile from './pages/UserProfile';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './context/LanguageContext';
@@ -33,6 +34,7 @@ const App: React.FC = () => {
                 <Route path="/event/:id" element={<EventDetails />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/admin" element={<AdminDashboard />} />
+                <Route path="/profile" element={<UserProfile />} />
               </Routes>
             </div>
           </Router>

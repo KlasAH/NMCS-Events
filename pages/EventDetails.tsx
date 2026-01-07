@@ -267,7 +267,7 @@ const EventDetails: React.FC = () => {
                         )}
                         
                         {/* Extra Info Buttons (Dynamic) */}
-                        {(meeting.extra_info as ExtraInfoSection[])?.map(extra => (
+                        {meeting.extra_info?.map(extra => (
                              <button 
                                 key={extra.id}
                                 onClick={() => setSelectedExtraInfo(extra)}
