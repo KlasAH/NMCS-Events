@@ -1,7 +1,8 @@
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
-import { Meeting, ExtraInfoSection, MapConfig, LinkItem } from '../types';
+import { Meeting, ExtraInfoSection, MapConfig } from '../types';
 import Itinerary from '../components/Itinerary';
 import Modal from '../components/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -131,7 +132,7 @@ const EventDetails: React.FC = () => {
     fetchMeeting();
   }, [id]);
 
-  const groupedMaps = useMemo<Record<string, MapConfig[]>>(() => {
+  const groupedMaps = useMemo(() => {
       if (!meeting?.maps_config) return {};
       const groups: Record<string, MapConfig[]> = {};
       meeting.maps_config.forEach(map => {
@@ -345,7 +346,7 @@ const EventDetails: React.FC = () => {
                                                 className="overflow-hidden"
                                             >
                                                 <div className="p-4 space-y-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
-                                                    {(maps as MapConfig[]).map((mapItem, idx) => (
+                                                    {maps.map((mapItem, idx) => (
                                                         <div key={idx} className="flex flex-col items-center text-center">
                                                             <div className="bg-white p-2 rounded-lg border border-slate-100 dark:border-slate-700 mb-2 shadow-sm">
                                                                 <QRCode
@@ -419,7 +420,7 @@ const EventDetails: React.FC = () => {
                         <div className="space-y-2">
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{t('bookNow')}</p>
                             <div className="grid grid-cols-1 gap-2">
-                                {(meeting.hotel_info.booking_links as LinkItem[]).map((link, i) => (
+                                {meeting.hotel_info.booking_links.map((link, i) => (
                                     <a 
                                         key={i}
                                         href={link.url}

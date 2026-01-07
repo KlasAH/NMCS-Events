@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Loader2, Home } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem } from '../types';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -36,10 +37,6 @@ const AdminDashboard: React.FC = () => {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings'>('overview');
   
-  // Loading State Helper
-  const [showLongLoadingMsg, setShowLongLoadingMsg] = useState(false);
-  const [forceRender, setForceRender] = useState(false);
-  
   // Selection State
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
@@ -66,28 +63,6 @@ const AdminDashboard: React.FC = () => {
       defaultContactEmail: 'contact@nmcs.club',
       yearlyTheme: 'JCW Racing Spirit'
   });
-
-  // Loading Timer
-  useEffect(() => {
-    if (loading) {
-        // Shorter timeout to show escape options faster
-        const timer = setTimeout(() => setShowLongLoadingMsg(true), 2500);
-        // Force render safety net after 5 seconds
-        const forceTimer = setTimeout(() => {
-            if (loading) {
-                console.warn("Dashboard: Forcing render due to timeout");
-                setForceRender(true);
-            }
-        }, 5000);
-
-        return () => {
-            clearTimeout(timer);
-            clearTimeout(forceTimer);
-        };
-    } else {
-        setShowLongLoadingMsg(false);
-    }
-  }, [loading]);
 
   // Load Data
   useEffect(() => {
@@ -125,67 +100,13 @@ const AdminDashboard: React.FC = () => {
     }
   }, [selectedEventId, activeTab, isAdmin]);
 
-  // Handle Loading State
-  const isLoadingState = loading && !forceRender;
-
-  if (isLoadingState) return (
-      <div className="flex flex-col h-screen items-center justify-center gap-6 bg-slate-50 dark:bg-slate-950 transition-colors p-6">
-          <div className="flex flex-col items-center animate-pulse">
-            <Loader2 size={48} className="text-mini-red animate-spin mb-4" />
-            <div className="text-slate-400 font-bold text-lg">Connecting to NMCS HQ...</div>
-          </div>
-          
-          {showLongLoadingMsg && (
-              <motion.div 
-                initial={{opacity:0, y: 10}} 
-                animate={{opacity:1, y: 0}} 
-                className="flex flex-col items-center gap-3 bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xl border border-red-100 dark:border-red-900/30 max-w-sm text-center"
-              >
-                  <AlertCircle className="text-mini-red" size={32} />
-                  <div>
-                      <h3 className="font-bold text-slate-900 dark:text-white">Is it stuck?</h3>
-                      <p className="text-sm text-slate-500 mt-1 mb-4">If the database is unresponsive, you can bypass the check.</p>
-                  </div>
-                  <div className="flex flex-col gap-2 w-full">
-                    {/* Skip Button */}
-                    <button 
-                        onClick={() => setForceRender(true)} 
-                        className="w-full py-2 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800 rounded-lg font-bold hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors flex items-center justify-center gap-2 mb-2"
-                    >
-                        Skip Loading (Force Access)
-                    </button>
-
-                    <button 
-                        onClick={() => window.location.reload()} 
-                        className="w-full py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-                    >
-                        Try Reloading
-                    </button>
-                    <div className="flex gap-2">
-                        <button 
-                            onClick={() => window.location.href = '/'} 
-                            className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200 flex items-center justify-center gap-2"
-                        >
-                            <Home size={16}/> Go Home
-                        </button>
-                        <button 
-                            onClick={() => signOut()} 
-                            className="flex-1 py-2 bg-mini-red text-white rounded-lg font-bold hover:bg-red-700"
-                        >
-                            Log Out
-                        </button>
-                    </div>
-                  </div>
-              </motion.div>
-          )}
-      </div>
-  );
+  if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
   
   // 1. Not Logged In
   if (!session) return <Navigate to="/login" replace />;
 
-  // 2. Logged In, but Not Admin/Board (and not forced)
-  if (!isAdmin && !forceRender) {
+  // 2. Logged In, but Not Admin/Board
+  if (!isAdmin) {
       return (
         <div className="min-h-screen pt-32 px-4 bg-slate-50 dark:bg-slate-950 flex flex-col items-center text-center transition-colors">
              <motion.div 
@@ -212,13 +133,6 @@ const AdminDashboard: React.FC = () => {
                         <li>Change the <code>role</code> column to <code>board</code> or <code>admin</code></li>
                         <li>Click <strong>Save</strong></li>
                     </ol>
-
-                    <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700 text-xs font-mono break-all opacity-70">
-                        <strong>Debug Info:</strong><br/>
-                        User ID: {session.user.id}<br/>
-                        Email: {session.user.email}<br/>
-                        Status: Not Admin (Check Failed or Timed Out)
-                    </div>
                 </div>
                 
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -240,8 +154,6 @@ const AdminDashboard: React.FC = () => {
       );
   }
 
-  // ... (Rest of component Logic)
-  
   const handleSettingChange = (key: string, value: any) => {
       setGlobalSettings(prev => ({...prev, [key]: value}));
   };
@@ -621,6 +533,7 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         </div>
                     )}
+
                     {/* 2. REGISTRATIONS TAB */}
                     {activeTab === 'registrations' && (
                         <div className="space-y-6">
@@ -652,6 +565,7 @@ const AdminDashboard: React.FC = () => {
                                         </div>
                                     </div>
 
+                                    {/* Filter Bar */}
                                     <div className="relative mb-6">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                         <input 
@@ -702,6 +616,8 @@ const AdminDashboard: React.FC = () => {
                             )}
                         </div>
                     )}
+
+                    {/* 3. FINANCES TAB */}
                     {activeTab === 'finances' && (
                         <div className="space-y-6">
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
@@ -720,6 +636,8 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         </div>
                     )}
+
+                    {/* 4. SETTINGS TAB */}
                     {activeTab === 'settings' && (
                         <div className="space-y-8">
                             <div>
@@ -728,6 +646,8 @@ const AdminDashboard: React.FC = () => {
                                 </h2>
                                 <p className="text-slate-500 dark:text-slate-400 mb-6">Manage security and global settings.</p>
                             </div>
+
+                            {/* Security Section */}
                             <div className="mb-8 p-6 bg-red-50 dark:bg-slate-800/50 rounded-2xl border border-red-100 dark:border-slate-700">
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
                                     <Lock size={18} className="text-mini-red"/> Security & My Account
@@ -757,6 +677,8 @@ const AdminDashboard: React.FC = () => {
                                     </div>
                                 </form>
                             </div>
+
+                            {/* User Management Section */}
                             <div className="mb-8 p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
                                     <UserCog size={18} className="text-slate-600 dark:text-slate-300"/> Board Access Management

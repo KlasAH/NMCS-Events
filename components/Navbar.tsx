@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Home, Shield, LogIn, LogOut, Sun, Moon, Car, User } from 'lucide-react';
+import { Home, Shield, LogIn, LogOut, Sun, Moon, Car } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme, MODELS } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -18,8 +18,6 @@ const Navbar: React.FC = () => {
   const navItems = [
     { name: t('events'), path: '/', icon: <Home size={18} /> },
     ...(isAdmin ? [{ name: t('admin'), path: '/admin', icon: <Shield size={18} /> }] : []),
-    // Profile link for authenticated users
-    ...(session ? [{ name: t('profile'), path: '/profile', icon: <User size={18} /> }] : []),
     // Only show Logout if session exists. Public login hidden from navbar.
     ...(session
       ? [{ name: t('logout'), action: signOut, icon: <LogOut size={18} /> }]

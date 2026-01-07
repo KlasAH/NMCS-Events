@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, AlertTriangle } from 'lucide-react';
+import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -26,34 +27,22 @@ const Login: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Check if user arrived via a password reset email link
-  // This must run before session check to ensure viewState is set correctly
-  useEffect(() => {
-    const hash = window.location.hash;
-    const query = new URLSearchParams(window.location.search);
-    // Check for recovery params in query OR hash (Supabase puts them in hash usually)
-    const isRecovery = query.get('recovery') === 'true' || 
-                       (hash && hash.includes('type=recovery')) ||
-                       (hash && hash.includes('recovery=true'));
-                       
-    if (isRecovery) {
-        setViewState('reset-confirm');
-    }
-  }, [location]);
-
   // Redirect if session becomes active (Login successful)
   useEffect(() => {
-    // CRITICAL: Do not redirect if we are in the middle of a password reset flow (reset-confirm).
-    // The link logs the user in, but we need them to stay here to type the new password.
-    const isRecoveryFlow = viewState === 'reset-confirm' || 
-                           window.location.hash.includes('type=recovery') ||
-                           window.location.href.includes('recovery=true');
-
-    if (session && !isRecoveryFlow) {
+    if (session) {
         // Use replace to prevent going back to login page
         navigate('/admin', { replace: true });
     }
-  }, [session, navigate, viewState]);
+  }, [session, navigate]);
+
+  // Check if user arrived via a password reset email link
+  useEffect(() => {
+    const hash = window.location.hash;
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('recovery') === 'true' || (hash && hash.includes('type=recovery'))) {
+        setViewState('reset-confirm');
+    }
+  }, [location]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,14 +104,7 @@ const Login: React.FC = () => {
         const { data, error } = await signUp(email, password, fullName, username);
         
         if (error) {
-            console.error("SignUp Error:", error);
-            if (error.message?.includes('Database error saving new user')) {
-                 setError('Technical Issue: The database could not save your profile. Please ask an admin to run the database repair script.');
-            } else if (error.message?.includes('violates unique constraint')) {
-                 setError('This email or username is already registered.');
-            } else {
-                 setError(error.message);
-            }
+            setError(error.message);
         } else if (data && data.session) {
             setSuccessMsg(t('successReg') + " " + t('processing'));
             // Session update will trigger redirect
@@ -143,36 +125,13 @@ const Login: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      let resetEmail = identifier;
-
-      try {
-        // If identifier is NOT an email, look it up first
-        if (!identifier.includes('@') && !isDemoMode) {
-            const { data, error: lookupError } = await supabase
-                .from('profiles')
-                .select('email')
-                .eq('username', identifier)
-                .single();
-            
-            if (lookupError || !data) {
-                setError(t('userNotFound'));
-                setLoading(false);
-                return;
-            }
-            resetEmail = data.email;
-        }
-
-        const { error } = await sendPasswordReset(resetEmail);
-        if (error) {
-            setError(error.message);
-        } else {
-            setSuccessMsg(t('checkEmail'));
-        }
-      } catch (err: any) {
-        setError(err.message || "Error processing request");
-      } finally {
-        setLoading(false);
+      const { error } = await sendPasswordReset(identifier);
+      if (error) {
+          setError(error.message);
+      } else {
+          setSuccessMsg(t('checkEmail'));
       }
+      setLoading(false);
   }
 
   const handleResetConfirm = async (e: React.FormEvent) => {
@@ -181,14 +140,11 @@ const Login: React.FC = () => {
       const { error } = await updatePassword(password);
       if (error) {
           setError(error.message);
-          setLoading(false);
       } else {
           setSuccessMsg("Password updated successfully! Logging you in...");
-          // Force redirect after a short delay
-          setTimeout(() => {
-              navigate('/admin', { replace: true });
-          }, 2000);
+          setTimeout(() => navigate('/admin'), 2000);
       }
+      setLoading(false);
   }
 
   const handleSocialLogin = async (provider: 'google' | 'apple') => {
@@ -338,9 +294,8 @@ const Login: React.FC = () => {
                 )}
 
                 {error && (
-                    <div className="text-mini-red text-sm text-center bg-red-50 dark:bg-red-900/20 p-3 rounded-xl font-medium border border-red-100 dark:border-red-900/50 flex flex-col items-center gap-1">
-                        <AlertTriangle size={18} className="mb-1" />
-                        <span>{error}</span>
+                    <div className="text-mini-red text-sm text-center bg-red-50 dark:bg-red-900/20 p-3 rounded-xl font-medium border border-red-100 dark:border-red-900/50">
+                    {error}
                     </div>
                 )}
 

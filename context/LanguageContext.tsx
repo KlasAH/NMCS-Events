@@ -16,7 +16,6 @@ const translations: Translations = {
   admin: { sv: 'Admin', en: 'Admin' },
   login: { sv: 'Logga in', en: 'Login' },
   logout: { sv: 'Logga ut', en: 'Logout' },
-  profile: { sv: 'Min Profil', en: 'My Profile' },
   back: { sv: 'Tillbaka', en: 'Back' },
 
   // Home / General
