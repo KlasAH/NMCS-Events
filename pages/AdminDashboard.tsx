@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Loader2 } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Loader2, Home } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem } from '../types';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -69,7 +69,8 @@ const AdminDashboard: React.FC = () => {
   // Loading Timer
   useEffect(() => {
     if (loading) {
-        const timer = setTimeout(() => setShowLongLoadingMsg(true), 3000);
+        // Shorter timeout to show escape options faster
+        const timer = setTimeout(() => setShowLongLoadingMsg(true), 2500);
         return () => clearTimeout(timer);
     } else {
         setShowLongLoadingMsg(false);
@@ -127,22 +128,30 @@ const AdminDashboard: React.FC = () => {
               >
                   <AlertCircle className="text-mini-red" size={32} />
                   <div>
-                      <h3 className="font-bold text-slate-900 dark:text-white">Connection Taking too Long?</h3>
-                      <p className="text-sm text-slate-500 mt-1 mb-4">You might be experiencing a network issue or a session glitch.</p>
+                      <h3 className="font-bold text-slate-900 dark:text-white">Is it stuck?</h3>
+                      <p className="text-sm text-slate-500 mt-1 mb-4">If the database is unresponsive, you can cancel loading.</p>
                   </div>
-                  <div className="flex gap-2 w-full">
+                  <div className="flex flex-col gap-2 w-full">
                     <button 
                         onClick={() => window.location.reload()} 
-                        className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                        className="w-full py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200"
                     >
-                        Reload
+                        Try Reloading
                     </button>
-                    <button 
-                        onClick={() => signOut()} 
-                        className="flex-1 py-2 bg-mini-red text-white rounded-lg font-bold hover:bg-red-700"
-                    >
-                        Log Out
-                    </button>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => window.location.href = '/'} 
+                            className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200 flex items-center justify-center gap-2"
+                        >
+                            <Home size={16}/> Go Home
+                        </button>
+                        <button 
+                            onClick={() => signOut()} 
+                            className="flex-1 py-2 bg-mini-red text-white rounded-lg font-bold hover:bg-red-700"
+                        >
+                            Log Out
+                        </button>
+                    </div>
                   </div>
               </motion.div>
           )}
@@ -208,6 +217,9 @@ const AdminDashboard: React.FC = () => {
       );
   }
 
+  // ... (Rest of component remains unchanged from previous versions, only the loading state and return are modified)
+  // Re-injecting standard component logic below for completeness
+  
   const handleSettingChange = (key: string, value: any) => {
       setGlobalSettings(prev => ({...prev, [key]: value}));
   };
