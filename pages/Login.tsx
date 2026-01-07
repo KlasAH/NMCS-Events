@@ -5,12 +5,12 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign } from 'lucide-react';
+import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, Loader2 } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { session, signIn, signInWithOAuth, signUp, sendPasswordReset, updatePassword } = useAuth();
+  const { session, signIn, signInWithOAuth, signUp, sendPasswordReset, updatePassword, loading: authLoading } = useAuth();
   const { t } = useLanguage();
   
   // 'login' | 'signup' | 'forgot' | 'reset-confirm'
@@ -23,17 +23,18 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [formLoading, setFormLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Redirect if session becomes active (Login successful)
   useEffect(() => {
-    if (session) {
-        // Use replace to prevent going back to login page
+    // Only redirect if we have a session AND auth loading is finished.
+    // This prevents redirecting before we know if the user is an admin or not.
+    if (session && !authLoading) {
         navigate('/admin', { replace: true });
     }
-  }, [session, navigate]);
+  }, [session, authLoading, navigate]);
 
   // Check if user arrived via a password reset email link
   useEffect(() => {
@@ -46,14 +47,11 @@ const Login: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setFormLoading(true);
     setError(null);
 
     if (isDemoMode) {
-        // Trigger session update in context. 
-        // The useEffect above will handle navigation once session is set.
         await signIn(identifier);
-        // Do NOT navigate manually here to avoid race conditions.
         return; 
     }
 
@@ -69,7 +67,7 @@ const Login: React.FC = () => {
         
         if (lookupError || !data) {
             setError(t('userNotFound'));
-            setLoading(false);
+            setFormLoading(false);
             return;
         }
         signInEmail = data.email;
@@ -82,13 +80,14 @@ const Login: React.FC = () => {
 
     if (error) {
       setError(error.message === "Invalid login credentials" ? t('invalidCreds') : error.message);
-      setLoading(false);
+      setFormLoading(false);
     }
+    // If successful, the AuthContext subscription will trigger the redirect in the useEffect above.
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
       e.preventDefault();
-      setLoading(true);
+      setFormLoading(true);
       setError(null);
 
       try {
@@ -96,7 +95,7 @@ const Login: React.FC = () => {
             const { data } = await supabase.from('profiles').select('id').eq('username', username).maybeSingle();
             if (data) {
                 setError(t('usernameTaken'));
-                setLoading(false);
+                setFormLoading(false);
                 return;
             }
         }
@@ -116,13 +115,13 @@ const Login: React.FC = () => {
          console.error(err);
          setError(err.message || t('unexpectedError'));
       } finally {
-        setLoading(false);
+        setFormLoading(false);
       }
   }
 
   const handleForgotPassword = async (e: React.FormEvent) => {
       e.preventDefault();
-      setLoading(true);
+      setFormLoading(true);
       setError(null);
 
       const { error } = await sendPasswordReset(identifier);
@@ -131,12 +130,12 @@ const Login: React.FC = () => {
       } else {
           setSuccessMsg(t('checkEmail'));
       }
-      setLoading(false);
+      setFormLoading(false);
   }
 
   const handleResetConfirm = async (e: React.FormEvent) => {
       e.preventDefault();
-      setLoading(true);
+      setFormLoading(true);
       const { error } = await updatePassword(password);
       if (error) {
           setError(error.message);
@@ -144,7 +143,7 @@ const Login: React.FC = () => {
           setSuccessMsg("Password updated successfully! Logging you in...");
           setTimeout(() => navigate('/admin'), 2000);
       }
-      setLoading(false);
+      setFormLoading(false);
   }
 
   const handleSocialLogin = async (provider: 'google' | 'apple') => {
@@ -153,6 +152,17 @@ const Login: React.FC = () => {
       } catch (err) {
           setError('Failed to initiate social login');
       }
+  }
+
+  // If we are already authenticated but loading admin status, show loader
+  if (session && authLoading) {
+      return (
+          <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+              <div className="animate-spin text-mini-red">
+                  <Loader2 size={48} />
+              </div>
+          </div>
+      );
   }
 
   return (
@@ -310,19 +320,19 @@ const Login: React.FC = () => {
                          </button>
                          <button
                             type="submit"
-                            disabled={loading}
+                            disabled={formLoading}
                             className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-all shadow-xl shadow-black/10 disabled:opacity-50"
                          >
-                            {loading ? t('creatingAccount') : t('createAccount')}
+                            {formLoading ? t('creatingAccount') : t('createAccount')}
                          </button>
                      </div>
                 ) : (
                     <button
                         type="submit"
-                        disabled={loading}
+                        disabled={formLoading}
                         className="w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors disabled:opacity-50 shadow-lg shadow-black/20 flex items-center justify-center gap-2"
                     >
-                        {loading ? t('processing') : (
+                        {formLoading ? t('processing') : (
                             viewState === 'login' ? <>{t('signIn')} <ArrowRight size={18}/></> :
                             viewState === 'forgot' ? t('sendResetLink') : t('updatePassword')
                         )}

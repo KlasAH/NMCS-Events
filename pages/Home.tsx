@@ -90,7 +90,7 @@ const Home: React.FC = () => {
 
   // Reset secret clicks if inactive
   useEffect(() => {
-      let timer: NodeJS.Timeout;
+      let timer: ReturnType<typeof setTimeout>;
       if (secretClicks > 0) {
           timer = setTimeout(() => setSecretClicks(0), 2000); // Reset after 2s of inactivity
       }

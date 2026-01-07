@@ -28,48 +28,75 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    // Initial Session Check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      checkAdmin(session);
+      if (session) {
+        checkAdmin(session);
+      } else {
+        setLoading(false);
+      }
     });
 
+    // Listen for Auth Changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      checkAdmin(session);
+      if (session) {
+          // Reset loading to true to prevent premature 'Restricted' access during role check
+          setLoading(true);
+          checkAdmin(session);
+      } else {
+          setIsAdmin(false);
+          setLoading(false);
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const checkAdmin = async (session: Session | null) => {
-    if (!session) {
-      setIsAdmin(false);
-      setLoading(false);
-      return;
-    }
+  const checkAdmin = async (currentSession: Session) => {
     try {
-      const { data, error } = await supabase.rpc('is_admin');
-      if (error || !data) {
-        const { data: profileData } = await supabase
+      let adminStatus = false;
+
+      // 1. Try RPC (Fastest method)
+      // We ignore errors here to allow fallback to work
+      const { data: rpcIsAdmin, error: rpcError } = await supabase.rpc('is_admin');
+      
+      if (!rpcError && rpcIsAdmin === true) {
+        adminStatus = true;
+      }
+
+      // 2. Fallback: Manual Table Check
+      // If RPC failed or returned false, we double-check the profiles table directly.
+      // This handles cases where the RPC might be out of sync or RLS issues occurred.
+      if (!adminStatus) {
+        const { data: profile } = await supabase
             .from('profiles')
             .select('role')
-            .eq('id', session.user.id)
+            .eq('id', currentSession.user.id)
             .single();
             
-        const { data: roleData } = await supabase
-            .from('user_roles')
-            .select('role')
-            .eq('user_id', session.user.id)
-            .single();
+        if (profile?.role === 'admin' || profile?.role === 'board') {
+            adminStatus = true;
+        } else {
+            // 3. Legacy Check: User Roles table
+            const { data: roleData } = await supabase
+                .from('user_roles')
+                .select('role')
+                .eq('user_id', currentSession.user.id)
+                .single();
             
-        const role = profileData?.role || roleData?.role;
-        setIsAdmin(role === 'admin' || role === 'board');
-      } else {
-        setIsAdmin(true);
+            if (roleData?.role === 'admin' || roleData?.role === 'board') {
+                adminStatus = true;
+            }
+        }
       }
+
+      setIsAdmin(adminStatus);
     } catch (e) {
+      console.error("Unexpected error checking admin status:", e);
       setIsAdmin(false);
     } finally {
       setLoading(false);
@@ -106,14 +133,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               } 
           });
       }
-      // For real mode, signIn is handled via supabase.auth directly in components usually, 
-      // or we could wrap it here.
   };
 
   const signUp = async (email: string, password: string, fullName: string, username: string) => {
     if (isDemoMode) {
-        // Mock successful signup
-        return { error: null, data: { session: null } }; // Return null session to simulate email verification required
+        return { error: null, data: { session: null } }; 
     }
     const { data, error } = await supabase.auth.signUp({
         email,
@@ -182,4 +206,3 @@ export const useAuth = () => {
   }
   return context;
 };
-        
