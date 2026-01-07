@@ -4,9 +4,10 @@ import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
 import { Meeting } from '../types';
 import EventCard from '../components/EventCard';
 import { motion } from 'framer-motion';
-import { Search } from 'lucide-react';
+import { Search, Database } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
+import SupabaseTester from '../components/SupabaseTester';
 
 const mockMeetings: Meeting[] = [
     {
@@ -63,6 +64,9 @@ const Home: React.FC = () => {
   // Secret Login Logic
   const [secretClicks, setSecretClicks] = useState(0);
   const navigate = useNavigate();
+
+  // Tester Modal State
+  const [isTesterOpen, setIsTesterOpen] = useState(false);
 
   useEffect(() => {
     if (isDemoMode) {
@@ -169,7 +173,6 @@ const Home: React.FC = () => {
                     className="w-24 md:w-32 h-auto hidden lg:block opacity-80 transition-all object-contain"
                     style={{ filter: `drop-shadow(0 0 10px ${currentTheme.color}30)` }}
                     alt={`${currentTheme.name} Left`}
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
 
                 {/* Logo 1: Vectorized Color Copy */}
@@ -180,7 +183,6 @@ const Home: React.FC = () => {
                     src={getAssetUrl('logos/nmcs-logo-color.png')} 
                     className="h-16 md:h-24 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
                     alt="NMCS Club Logo"
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
             </div>
 
@@ -204,7 +206,6 @@ const Home: React.FC = () => {
                     src={getAssetUrl('logos/nmcs-badge.png')}
                     className="h-16 md:h-24 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
                     alt="NMCS Badge"
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
 
                 {/* Right Car (Theme) */}
@@ -217,7 +218,6 @@ const Home: React.FC = () => {
                     className="w-24 md:w-32 h-auto hidden lg:block opacity-80 scale-x-[-1] transition-all object-contain"
                     style={{ filter: `drop-shadow(0 0 10px ${currentTheme.color}30)` }}
                     alt={`${currentTheme.name} Right`}
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
             </div>
         </div>
@@ -293,12 +293,12 @@ const Home: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 text-center">
             <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-6">Heritage & History</h3>
             
-            <div className="flex flex-wrap items-center justify-center gap-12 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
-                 {/* Old Classic Logo - Use .jpg */}
+            <div className="flex flex-wrap items-center justify-center gap-12 opacity-90 transition-all duration-500">
+                 {/* Old Classic Logo - JPG */}
                  <div className="flex flex-col items-center gap-2">
                     <img 
                         src={getAssetUrl('logos/logo_old.jpg')}
-                        className="h-16 w-auto object-contain dark:invert"
+                        className="h-16 w-auto object-contain rounded-lg"
                         alt="Classic Mini Heritage"
                     />
                     <span className="text-[10px] font-bold text-slate-400">Classic</span>
@@ -306,11 +306,11 @@ const Home: React.FC = () => {
 
                 <div className="h-10 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block"></div>
 
-                {/* Previous Modern Logo - Use .jpg */}
+                {/* Modern Logo - JPG */}
                 <div className="flex flex-col items-center gap-2">
                     <img 
                         src={getAssetUrl('logos/logo_new.jpg')}
-                        className="h-16 w-auto object-contain dark:invert"
+                        className="h-16 w-auto object-contain rounded-lg"
                         alt="Modern Mini Heritage"
                     />
                     <span className="text-[10px] font-bold text-slate-400">Modern Era</span>
@@ -321,8 +321,8 @@ const Home: React.FC = () => {
                 &copy; {new Date().getFullYear()} New Mini Club Sweden.
             </div>
 
-            {/* Secret Admin Login Button */}
-            <div className="mt-8 flex justify-center">
+            {/* Admin & Tester Tools */}
+            <div className="mt-8 flex justify-center items-center gap-6">
                 <button
                     onClick={() => setSecretClicks(p => p + 1)}
                     className={`text-[10px] font-medium transition-colors duration-300 ${
@@ -332,9 +332,20 @@ const Home: React.FC = () => {
                 >
                     Inloggning för styrelsen
                 </button>
+                
+                <span className="text-slate-300 dark:text-slate-700 text-[10px]">|</span>
+
+                <button
+                    onClick={() => setIsTesterOpen(true)}
+                    className="text-[10px] font-medium text-slate-300 dark:text-slate-700 hover:text-mini-red transition-colors flex items-center gap-1"
+                >
+                    <Database size={10} /> Check Database Connection
+                </button>
             </div>
         </div>
     </footer>
+    
+    <SupabaseTester isOpen={isTesterOpen} onClose={() => setIsTesterOpen(false)} />
     </div>
   );
 };

@@ -98,7 +98,15 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
   UNIQUE(user_id)
 );
 
--- 7. STORAGE
+-- 7. CONNECTION TESTS (New for diagnostics)
+CREATE TABLE IF NOT EXISTS public.connection_tests (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  message TEXT,
+  response_data TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 8. STORAGE
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('nmcs-assets', 'nmcs-assets', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
@@ -112,6 +120,7 @@ BEGIN
     EXECUTE 'ALTER TABLE public.registrations ENABLE ROW LEVEL SECURITY';
     EXECUTE 'ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY';
     EXECUTE 'ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY';
 EXCEPTION
     WHEN others THEN NULL;
 END $$;
@@ -147,6 +156,7 @@ DROP POLICY IF EXISTS "Admins can update registrations" ON public.registrations;
 DROP POLICY IF EXISTS "Admins can manage transactions" ON public.transactions;
 DROP POLICY IF EXISTS "Users can read own role" ON public.user_roles;
 DROP POLICY IF EXISTS "Admins can manage roles" ON public.user_roles;
+DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
 
 -- POLICIES
 
@@ -177,6 +187,9 @@ CREATE POLICY "Admins can manage transactions" ON public.transactions FOR ALL US
 -- User Roles
 CREATE POLICY "Users can read own role" ON public.user_roles FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Admins can manage roles" ON public.user_roles FOR ALL USING (is_admin());
+
+-- Connection Tests (Allow everyone to read/write for diagnostics)
+CREATE POLICY "Public can test connection" ON public.connection_tests FOR ALL USING (true) WITH CHECK (true);
 
 -- Storage Policies
 DROP POLICY IF EXISTS "Public Access" ON storage.objects;

@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, Loader2, Database, ShieldCheck, Server } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -26,6 +26,15 @@ const Login: React.FC = () => {
   const [formLoading, setFormLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // New: Handshake Visualization State
+  const [handshakeStep, setHandshakeStep] = useState<number>(0);
+  const handshakeMessages = [
+      { msg: 'Connecting to Supabase...', icon: Server },
+      { msg: 'Securing Credentials (Bcrypt)...', icon: ShieldCheck },
+      { msg: 'Persisting to Database...', icon: Database },
+      { msg: 'Handshake Complete.', icon: CheckCircle }
+  ];
 
   // Redirect if session becomes active (Login successful)
   useEffect(() => {
@@ -85,17 +94,38 @@ const Login: React.FC = () => {
     // If successful, the AuthContext subscription will trigger the redirect in the useEffect above.
   };
 
+  const runHandshakeSimulation = async () => {
+      setHandshakeStep(0);
+      return new Promise<void>(resolve => {
+          let step = 0;
+          const interval = setInterval(() => {
+              step++;
+              setHandshakeStep(step);
+              if(step >= 3) {
+                  clearInterval(interval);
+                  resolve();
+              }
+          }, 600); // 600ms per step for visual effect
+      });
+  }
+
   const handleSignUp = async (e: React.FormEvent) => {
       e.preventDefault();
       setFormLoading(true);
       setError(null);
+      setHandshakeStep(1); // Start visualization
 
       try {
+        // Run visual handshake before actual request to show user what is happening
+        // (In parallel with request would be faster, but sequential feels more robust for this specific UX request)
+        await runHandshakeSimulation(); 
+        
         if (!isDemoMode) {
             const { data } = await supabase.from('profiles').select('id').eq('username', username).maybeSingle();
             if (data) {
                 setError(t('usernameTaken'));
                 setFormLoading(false);
+                setHandshakeStep(0);
                 return;
             }
         }
@@ -104,16 +134,21 @@ const Login: React.FC = () => {
         
         if (error) {
             setError(error.message);
+            setHandshakeStep(0);
         } else if (data && data.session) {
             setSuccessMsg(t('successReg') + " " + t('processing'));
             // Session update will trigger redirect
         } else {
             setSuccessMsg(t('successReg') + " " + t('checkEmail'));
-            setTimeout(() => setViewState('login'), 5000);
+            setTimeout(() => {
+                setViewState('login');
+                setHandshakeStep(0);
+            }, 5000);
         }
       } catch (err: any) {
          console.error(err);
          setError(err.message || t('unexpectedError'));
+         setHandshakeStep(0);
       } finally {
         setFormLoading(false);
       }
@@ -171,7 +206,7 @@ const Login: React.FC = () => {
         layout
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl p-8 border border-slate-100 dark:border-slate-800 transition-colors"
+        className="max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl shadow-xl p-8 border border-slate-100 dark:border-slate-800 transition-colors relative overflow-hidden"
       >
         <div className="text-center mb-6">
             <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">
@@ -187,6 +222,41 @@ const Login: React.FC = () => {
                 {viewState === 'reset-confirm' && t('resetConfirmSub')}
             </p>
         </div>
+
+        {/* Handshake Visualizer Overlay (Only active during signup process) */}
+        {handshakeStep > 0 && viewState === 'signup' && (
+            <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="absolute inset-0 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm z-20 flex flex-col items-center justify-center p-8 text-center"
+            >
+                <div className="mb-8 relative">
+                    <div className="w-20 h-20 rounded-full bg-mini-red/10 flex items-center justify-center relative">
+                        {handshakeMessages.map((item, idx) => (
+                             idx === handshakeStep && (
+                                <motion.div key={idx} initial={{scale: 0.5, opacity: 0}} animate={{scale: 1, opacity: 1}}>
+                                    <item.icon className="text-mini-red" size={40} />
+                                </motion.div>
+                             )
+                        ))}
+                    </div>
+                    {/* Ripple effect */}
+                    <div className="absolute inset-0 rounded-full border-4 border-mini-red/20 animate-ping" />
+                </div>
+                
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Establishing Secure Connection</h3>
+                <div className="w-full max-w-[200px] h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden mb-4">
+                    <motion.div 
+                        className="h-full bg-mini-red" 
+                        initial={{ width: "0%" }}
+                        animate={{ width: `${(handshakeStep / 3) * 100}%` }}
+                    />
+                </div>
+                <p className="text-sm font-mono text-slate-500 dark:text-slate-400">
+                    {handshakeMessages[handshakeStep]?.msg || "Processing..."}
+                </p>
+            </motion.div>
+        )}
 
         <AnimatePresence mode='wait'>
             {successMsg ? (
@@ -300,6 +370,11 @@ const Login: React.FC = () => {
                             {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                         </button>
                         </div>
+                        {viewState === 'signup' && (
+                            <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                                <ShieldCheck size={10} /> Password will be encrypted with Bcrypt hashing before storage.
+                            </p>
+                        )}
                     </div>
                 )}
 
