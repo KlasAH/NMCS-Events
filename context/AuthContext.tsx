@@ -66,44 +66,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Safety timeout: Ensure loading never hangs indefinitely
-    const timeoutId = setTimeout(() => {
-        console.warn('Admin check timed out, forcing loading false');
-        setLoading(false);
-    }, 5000);
-
     try {
-      // 1. Try RPC call (preferred, robust)
-      const { data, error } = await supabase.rpc('is_admin');
-      
-      if (!error && typeof data === 'boolean') {
-        setIsAdmin(data);
-      } else {
-        // 2. Fallback: Query tables directly if RPC fails
-        // Check profiles table
-        const { data: profileData } = await supabase
+        // Enforce a hard timeout using Promise.race
+        // If the DB check hangs, this ensures the app loads (as non-admin) after 5 seconds
+        const isAdminResult = await Promise.race([
+            performAdminCheck(currentSession),
+            new Promise<boolean>((_, reject) => 
+                setTimeout(() => reject(new Error('Admin check timed out')), 5000)
+            )
+        ]);
+        
+        setIsAdmin(isAdminResult);
+    } catch (e) {
+        console.warn('Admin check timed out or failed:', e);
+        // Default to false on error so the app loads the "Restricted" screen instead of spinning forever
+        setIsAdmin(false);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const performAdminCheck = async (session: Session): Promise<boolean> => {
+      try {
+        // 1. Try RPC (preferred)
+        const { data: rpcData, error: rpcError } = await supabase.rpc('is_admin');
+        if (!rpcError && typeof rpcData === 'boolean') {
+            return rpcData;
+        }
+
+        // 2. Fallback: Direct Query
+        const { data: profile } = await supabase
             .from('profiles')
             .select('role')
-            .eq('id', currentSession.user.id)
+            .eq('id', session.user.id)
             .single();
             
-        // Check user_roles table (legacy support)
+        if (profile) {
+            return profile.role === 'admin' || profile.role === 'board';
+        }
+        
+        // 3. Legacy Fallback
         const { data: roleData } = await supabase
             .from('user_roles')
             .select('role')
-            .eq('user_id', currentSession.user.id)
+            .eq('user_id', session.user.id)
             .single();
-            
-        const role = profileData?.role || roleData?.role;
-        setIsAdmin(role === 'admin' || role === 'board');
+
+        return roleData?.role === 'admin' || roleData?.role === 'board';
+        
+      } catch (err) {
+          console.error("Error during admin check execution:", err);
+          return false;
       }
-    } catch (e) {
-      console.error('Check admin error:', e);
-      setIsAdmin(false);
-    } finally {
-      clearTimeout(timeoutId);
-      setLoading(false);
-    }
   };
 
   const signOut = async () => {
@@ -119,7 +133,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = async (email: string) => {
       if (isDemoMode) {
-          // Mock successful login
           setIsAdmin(true);
           setSession({ 
               access_token: 'mock', 

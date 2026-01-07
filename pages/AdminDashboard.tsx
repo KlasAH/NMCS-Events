@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
@@ -37,6 +36,9 @@ const AdminDashboard: React.FC = () => {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings'>('overview');
   
+  // Loading State Helper
+  const [showLongLoadingMsg, setShowLongLoadingMsg] = useState(false);
+  
   // Selection State
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
@@ -63,6 +65,14 @@ const AdminDashboard: React.FC = () => {
       defaultContactEmail: 'contact@nmcs.club',
       yearlyTheme: 'JCW Racing Spirit'
   });
+
+  // Loading Timer
+  useEffect(() => {
+    if (loading) {
+        const timer = setTimeout(() => setShowLongLoadingMsg(true), 3000);
+        return () => clearTimeout(timer);
+    }
+  }, [loading]);
 
   // Load Data
   useEffect(() => {
@@ -100,7 +110,19 @@ const AdminDashboard: React.FC = () => {
     }
   }, [selectedEventId, activeTab, isAdmin]);
 
-  if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
+  if (loading) return (
+      <div className="flex flex-col h-screen items-center justify-center gap-4 bg-slate-50 dark:bg-slate-950 transition-colors">
+          <div className="animate-pulse text-slate-400 font-bold">Connecting to NMCS HQ...</div>
+          {showLongLoadingMsg && (
+              <motion.div initial={{opacity:0}} animate={{opacity:1}} className="text-center">
+                  <p className="text-sm text-slate-500 mb-2">Taking longer than expected?</p>
+                  <button onClick={() => window.location.reload()} className="text-mini-red font-bold text-sm underline hover:text-red-700">
+                      Reload Page
+                  </button>
+              </motion.div>
+          )}
+      </div>
+  );
   
   // 1. Not Logged In
   if (!session) return <Navigate to="/login" replace />;
@@ -133,6 +155,13 @@ const AdminDashboard: React.FC = () => {
                         <li>Change the <code>role</code> column to <code>board</code> or <code>admin</code></li>
                         <li>Click <strong>Save</strong></li>
                     </ol>
+
+                    <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700 text-xs font-mono break-all opacity-70">
+                        <strong>Debug Info:</strong><br/>
+                        User ID: {session.user.id}<br/>
+                        Email: {session.user.email}<br/>
+                        Status: Not Admin (Check Failed or Timed Out)
+                    </div>
                 </div>
                 
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
