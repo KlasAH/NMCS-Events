@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
@@ -132,7 +131,7 @@ const EventDetails: React.FC = () => {
     fetchMeeting();
   }, [id]);
 
-  const groupedMaps = useMemo(() => {
+  const groupedMaps = useMemo<Record<string, MapConfig[]>>(() => {
       if (!meeting?.maps_config) return {};
       const groups: Record<string, MapConfig[]> = {};
       meeting.maps_config.forEach(map => {

@@ -5,7 +5,7 @@ import { supabase, isDemoMode } from '../lib/supabase';
 import { useTheme, MODELS } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import { motion } from 'framer-motion';
-import { User, Lock, Save, Car, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { User, Lock, Save, Car, CheckCircle, AlertCircle, Loader2, Mail } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const UserProfile: React.FC = () => {
@@ -18,6 +18,7 @@ const UserProfile: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [fullName, setFullName] = useState('');
     const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [carModel, setCarModel] = useState(model);
     
     const [newPassword, setNewPassword] = useState('');
@@ -32,6 +33,8 @@ const UserProfile: React.FC = () => {
 
         const fetchProfile = async () => {
             if (session) {
+                 setEmail(session.user.email || '');
+
                  if (isDemoMode) {
                      setFullName("Demo User");
                      setUsername("demouser");
@@ -40,7 +43,6 @@ const UserProfile: React.FC = () => {
                  }
 
                  // Try to fetch profile data. 
-                 // Note: We use maybeSingle() to handle cases where profile might not exist yet
                  const { data, error } = await supabase
                     .from('profiles')
                     .select('full_name, username, car_model')
@@ -77,16 +79,18 @@ const UserProfile: React.FC = () => {
             // 2. Update Profile Data
             if (!isDemoMode && session) {
                 const updates = {
+                    id: session.user.id, // Required for upsert
+                    email: session.user.email, // Ensure email is synced
                     full_name: fullName,
                     username: username,
                     car_model: carModel,
                     updated_at: new Date().toISOString(),
                 };
 
+                // Use upsert to create profile if it doesn't exist
                 const { error: profileError } = await supabase
                     .from('profiles')
-                    .update(updates)
-                    .eq('id', session.user.id);
+                    .upsert(updates);
                     
                 if (profileError) throw profileError;
             }
@@ -129,6 +133,21 @@ const UserProfile: React.FC = () => {
                         <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 dark:text-slate-200">
                             <User size={20} className="text-mini-red" /> Personal Information
                         </h3>
+                        
+                        {/* Read Only Email */}
+                        <div>
+                             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('email')}</label>
+                             <div className="relative">
+                                <input 
+                                    type="text" 
+                                    value={email}
+                                    disabled
+                                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 cursor-not-allowed"
+                                />
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                             </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('fullName')}</label>
