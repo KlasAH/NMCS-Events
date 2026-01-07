@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign } from 'lucide-react';
+import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, AlertTriangle } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -116,7 +115,14 @@ const Login: React.FC = () => {
         const { data, error } = await signUp(email, password, fullName, username);
         
         if (error) {
-            setError(error.message);
+            console.error("SignUp Error:", error);
+            if (error.message?.includes('Database error saving new user')) {
+                 setError('Technical Issue: The database could not save your profile. Please ask an admin to run the database repair script.');
+            } else if (error.message?.includes('violates unique constraint')) {
+                 setError('This email or username is already registered.');
+            } else {
+                 setError(error.message);
+            }
         } else if (data && data.session) {
             setSuccessMsg(t('successReg') + " " + t('processing'));
             // Session update will trigger redirect
@@ -332,8 +338,9 @@ const Login: React.FC = () => {
                 )}
 
                 {error && (
-                    <div className="text-mini-red text-sm text-center bg-red-50 dark:bg-red-900/20 p-3 rounded-xl font-medium border border-red-100 dark:border-red-900/50">
-                    {error}
+                    <div className="text-mini-red text-sm text-center bg-red-50 dark:bg-red-900/20 p-3 rounded-xl font-medium border border-red-100 dark:border-red-900/50 flex flex-col items-center gap-1">
+                        <AlertTriangle size={18} className="mb-1" />
+                        <span>{error}</span>
                     </div>
                 )}
 

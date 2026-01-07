@@ -2,15 +2,39 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. PROFILES TABLE (New: Syncs with Auth)
+-- 1. PROFILES TABLE
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
   full_name TEXT,
+  username TEXT,
   role TEXT CHECK (role IN ('admin', 'board', 'user')) DEFAULT 'user',
-  car_model TEXT DEFAULT 'r53', -- New: Stores the user's selected car theme
+  car_model TEXT DEFAULT 'r53',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- MIGRATION HELPERS: Ensure columns exist if table was already created
+DO $$ 
+BEGIN 
+    BEGIN
+        ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
+    EXCEPTION
+        WHEN duplicate_column THEN RAISE NOTICE 'username column already exists in profiles.';
+    END;
+    
+    BEGIN
+        ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+    EXCEPTION
+        WHEN duplicate_column THEN RAISE NOTICE 'full_name column already exists in profiles.';
+    END;
+
+    BEGIN
+        ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT DEFAULT 'r53';
+    EXCEPTION
+        WHEN duplicate_column THEN RAISE NOTICE 'car_model column already exists in profiles.';
+    END;
+END $$;
+
 
 -- 2. MEETINGS TABLE
 CREATE TABLE IF NOT EXISTS public.meetings (
@@ -22,7 +46,7 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   location_name TEXT NOT NULL,
   description TEXT,
   cover_image_url TEXT,
-  pdf_url TEXT, -- New: Stores path to PDF in storage (e.g. 'pdf/event.pdf')
+  pdf_url TEXT, 
   is_pinned BOOLEAN DEFAULT false,
   maps_config JSONB DEFAULT '[]'::jsonb,
   hotel_info JSONB DEFAULT '{}'::jsonb,
@@ -30,11 +54,6 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   custom_data JSONB DEFAULT '{}'::jsonb,
   extra_info JSONB DEFAULT '[]'::jsonb
 );
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS end_date DATE;
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS hotel_info JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS parking_info JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS extra_info JSONB DEFAULT '[]'::jsonb;
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS pdf_url TEXT;
 
 -- 3. ITINERARY ITEMS TABLE
 CREATE TABLE IF NOT EXISTS public.itinerary_items (
@@ -62,7 +81,6 @@ CREATE TABLE IF NOT EXISTS public.registrations (
   status TEXT CHECK (status IN ('confirmed', 'pending', 'cancelled')) DEFAULT 'pending',
   registered_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
-ALTER TABLE public.registrations ADD COLUMN IF NOT EXISTS car_type TEXT;
 
 -- 5. TRANSACTIONS TABLE
 CREATE TABLE IF NOT EXISTS public.transactions (
@@ -75,7 +93,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   category TEXT
 );
 
--- 6. USER ROLES (Legacy/Redundant if using profiles, but keeping for compatibility if preferred)
+-- 6. USER ROLES (Legacy)
 CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
@@ -84,11 +102,6 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
 );
 
 -- 7. STORAGE BUCKET SETUP
--- NOTE: SQL cannot create folders inside buckets.
--- Expected Folder Structure in 'nmcs-assets':
---   - /models (Car images: r53.png, etc.)
---   - /logos  (App logos: nmcs-logo-color.png, nmcs-badge.png)
---   - /pdf    (Event documents)
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('nmcs-assets', 'nmcs-assets', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
@@ -123,8 +136,6 @@ DROP POLICY IF EXISTS "Admins can update registrations" ON public.registrations;
 DROP POLICY IF EXISTS "Admins can manage transactions" ON public.transactions;
 DROP POLICY IF EXISTS "Users can read own role" ON public.user_roles;
 DROP POLICY IF EXISTS "Admins can manage roles" ON public.user_roles;
-
--- STORAGE POLICIES
 DROP POLICY IF EXISTS "Public Access" ON storage.objects;
 DROP POLICY IF EXISTS "Auth Upload" ON storage.objects;
 DROP POLICY IF EXISTS "Auth Update" ON storage.objects;
@@ -147,6 +158,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Profiles
 CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+-- Allow users to insert their own profile (Critical for the 'upsert' logic in UserProfile.tsx)
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- Meetings
 CREATE POLICY "Public meetings are viewable by everyone" ON public.meetings FOR SELECT USING (true);
@@ -168,28 +181,42 @@ CREATE POLICY "Admins can update registrations" ON public.registrations FOR UPDA
 CREATE POLICY "Admins can manage transactions" ON public.transactions FOR ALL USING (is_admin());
 
 -- Storage Policies
--- Allows public access to all files in the bucket
 CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING ( bucket_id = 'nmcs-assets' );
--- Allows authenticated users to upload (for admin usage mostly)
 CREATE POLICY "Auth Upload" ON storage.objects FOR INSERT WITH CHECK ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Update" ON storage.objects FOR UPDATE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Delete" ON storage.objects FOR DELETE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 
--- TRIGGER: HANDLE NEW USER
+-- TRIGGER: HANDLE NEW USER (Updated to be more robust)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  extracted_username TEXT;
+  extracted_fullname TEXT;
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name, role)
+  -- Try to get username from metadata, fallback to email prefix
+  extracted_username := COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
+  
+  -- Try to get full name, fallback to 'New User'
+  extracted_fullname := COALESCE(new.raw_user_meta_data->>'full_name', 'New User');
+
+  INSERT INTO public.profiles (id, email, full_name, username, role)
   VALUES (
     new.id, 
     new.email, 
-    COALESCE(new.raw_user_meta_data->>'full_name', 'New User'),
+    extracted_fullname,
+    extracted_username,
     'user'
-  );
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    full_name = EXCLUDED.full_name,
+    username = EXCLUDED.username;
+    
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Re-create the trigger to ensure it uses the updated function
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
