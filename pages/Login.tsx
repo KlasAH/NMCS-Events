@@ -27,22 +27,34 @@ const Login: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Redirect if session becomes active (Login successful)
-  useEffect(() => {
-    if (session) {
-        // Use replace to prevent going back to login page
-        navigate('/admin', { replace: true });
-    }
-  }, [session, navigate]);
-
   // Check if user arrived via a password reset email link
+  // This must run before session check to ensure viewState is set correctly
   useEffect(() => {
     const hash = window.location.hash;
     const query = new URLSearchParams(window.location.search);
-    if (query.get('recovery') === 'true' || (hash && hash.includes('type=recovery'))) {
+    // Check for recovery params in query OR hash (Supabase puts them in hash usually)
+    const isRecovery = query.get('recovery') === 'true' || 
+                       (hash && hash.includes('type=recovery')) ||
+                       (hash && hash.includes('recovery=true'));
+                       
+    if (isRecovery) {
         setViewState('reset-confirm');
     }
   }, [location]);
+
+  // Redirect if session becomes active (Login successful)
+  useEffect(() => {
+    // CRITICAL: Do not redirect if we are in the middle of a password reset flow (reset-confirm).
+    // The link logs the user in, but we need them to stay here to type the new password.
+    const isRecoveryFlow = viewState === 'reset-confirm' || 
+                           window.location.hash.includes('type=recovery') ||
+                           window.location.href.includes('recovery=true');
+
+    if (session && !isRecoveryFlow) {
+        // Use replace to prevent going back to login page
+        navigate('/admin', { replace: true });
+    }
+  }, [session, navigate, viewState]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,13 +137,36 @@ const Login: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const { error } = await sendPasswordReset(identifier);
-      if (error) {
-          setError(error.message);
-      } else {
-          setSuccessMsg(t('checkEmail'));
+      let resetEmail = identifier;
+
+      try {
+        // If identifier is NOT an email, look it up first
+        if (!identifier.includes('@') && !isDemoMode) {
+            const { data, error: lookupError } = await supabase
+                .from('profiles')
+                .select('email')
+                .eq('username', identifier)
+                .single();
+            
+            if (lookupError || !data) {
+                setError(t('userNotFound'));
+                setLoading(false);
+                return;
+            }
+            resetEmail = data.email;
+        }
+
+        const { error } = await sendPasswordReset(resetEmail);
+        if (error) {
+            setError(error.message);
+        } else {
+            setSuccessMsg(t('checkEmail'));
+        }
+      } catch (err: any) {
+        setError(err.message || "Error processing request");
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
   }
 
   const handleResetConfirm = async (e: React.FormEvent) => {
@@ -140,11 +175,14 @@ const Login: React.FC = () => {
       const { error } = await updatePassword(password);
       if (error) {
           setError(error.message);
+          setLoading(false);
       } else {
           setSuccessMsg("Password updated successfully! Logging you in...");
-          setTimeout(() => navigate('/admin'), 2000);
+          // Force redirect after a short delay
+          setTimeout(() => {
+              navigate('/admin', { replace: true });
+          }, 2000);
       }
-      setLoading(false);
   }
 
   const handleSocialLogin = async (provider: 'google' | 'apple') => {

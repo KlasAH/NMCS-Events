@@ -146,8 +146,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log(`Mock reset email sent to ${email}`);
           return { error: null };
       }
+      // Ensure redirect works with HashRouter by pointing to /#/login
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin + '/login?recovery=true',
+          redirectTo: window.location.origin + '/#/login?recovery=true',
       });
       return { error };
   }
@@ -182,4 +183,3 @@ export const useAuth = () => {
   }
   return context;
 };
-        
