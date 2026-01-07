@@ -38,6 +38,7 @@ const AdminDashboard: React.FC = () => {
   
   // Loading State Helper
   const [showLongLoadingMsg, setShowLongLoadingMsg] = useState(false);
+  const [forceRender, setForceRender] = useState(false);
   
   // Selection State
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -71,7 +72,18 @@ const AdminDashboard: React.FC = () => {
     if (loading) {
         // Shorter timeout to show escape options faster
         const timer = setTimeout(() => setShowLongLoadingMsg(true), 2500);
-        return () => clearTimeout(timer);
+        // Force render safety net after 5 seconds
+        const forceTimer = setTimeout(() => {
+            if (loading) {
+                console.warn("Dashboard: Forcing render due to timeout");
+                setForceRender(true);
+            }
+        }, 5000);
+
+        return () => {
+            clearTimeout(timer);
+            clearTimeout(forceTimer);
+        };
     } else {
         setShowLongLoadingMsg(false);
     }
@@ -113,7 +125,10 @@ const AdminDashboard: React.FC = () => {
     }
   }, [selectedEventId, activeTab, isAdmin]);
 
-  if (loading) return (
+  // Handle Loading State
+  const isLoadingState = loading && !forceRender;
+
+  if (isLoadingState) return (
       <div className="flex flex-col h-screen items-center justify-center gap-6 bg-slate-50 dark:bg-slate-950 transition-colors p-6">
           <div className="flex flex-col items-center animate-pulse">
             <Loader2 size={48} className="text-mini-red animate-spin mb-4" />
@@ -129,9 +144,17 @@ const AdminDashboard: React.FC = () => {
                   <AlertCircle className="text-mini-red" size={32} />
                   <div>
                       <h3 className="font-bold text-slate-900 dark:text-white">Is it stuck?</h3>
-                      <p className="text-sm text-slate-500 mt-1 mb-4">If the database is unresponsive, you can cancel loading.</p>
+                      <p className="text-sm text-slate-500 mt-1 mb-4">If the database is unresponsive, you can bypass the check.</p>
                   </div>
                   <div className="flex flex-col gap-2 w-full">
+                    {/* Skip Button */}
+                    <button 
+                        onClick={() => setForceRender(true)} 
+                        className="w-full py-2 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800 rounded-lg font-bold hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors flex items-center justify-center gap-2 mb-2"
+                    >
+                        Skip Loading (Force Access)
+                    </button>
+
                     <button 
                         onClick={() => window.location.reload()} 
                         className="w-full py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200"
@@ -161,8 +184,8 @@ const AdminDashboard: React.FC = () => {
   // 1. Not Logged In
   if (!session) return <Navigate to="/login" replace />;
 
-  // 2. Logged In, but Not Admin/Board
-  if (!isAdmin) {
+  // 2. Logged In, but Not Admin/Board (and not forced)
+  if (!isAdmin && !forceRender) {
       return (
         <div className="min-h-screen pt-32 px-4 bg-slate-50 dark:bg-slate-950 flex flex-col items-center text-center transition-colors">
              <motion.div 
@@ -217,8 +240,7 @@ const AdminDashboard: React.FC = () => {
       );
   }
 
-  // ... (Rest of component remains unchanged from previous versions, only the loading state and return are modified)
-  // Re-injecting standard component logic below for completeness
+  // ... (Rest of component Logic)
   
   const handleSettingChange = (key: string, value: any) => {
       setGlobalSettings(prev => ({...prev, [key]: value}));
@@ -599,7 +621,7 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         </div>
                     )}
-                    {/* (Other tabs: Registrations, Finances, Settings - preserved via previous full file logic) */}
+                    {/* 2. REGISTRATIONS TAB */}
                     {activeTab === 'registrations' && (
                         <div className="space-y-6">
                             {!selectedEventId ? (
