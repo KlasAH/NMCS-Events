@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Loader2 } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem } from '../types';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -71,6 +71,8 @@ const AdminDashboard: React.FC = () => {
     if (loading) {
         const timer = setTimeout(() => setShowLongLoadingMsg(true), 3000);
         return () => clearTimeout(timer);
+    } else {
+        setShowLongLoadingMsg(false);
     }
   }, [loading]);
 
@@ -111,14 +113,37 @@ const AdminDashboard: React.FC = () => {
   }, [selectedEventId, activeTab, isAdmin]);
 
   if (loading) return (
-      <div className="flex flex-col h-screen items-center justify-center gap-4 bg-slate-50 dark:bg-slate-950 transition-colors">
-          <div className="animate-pulse text-slate-400 font-bold">Connecting to NMCS HQ...</div>
+      <div className="flex flex-col h-screen items-center justify-center gap-6 bg-slate-50 dark:bg-slate-950 transition-colors p-6">
+          <div className="flex flex-col items-center animate-pulse">
+            <Loader2 size={48} className="text-mini-red animate-spin mb-4" />
+            <div className="text-slate-400 font-bold text-lg">Connecting to NMCS HQ...</div>
+          </div>
+          
           {showLongLoadingMsg && (
-              <motion.div initial={{opacity:0}} animate={{opacity:1}} className="text-center">
-                  <p className="text-sm text-slate-500 mb-2">Taking longer than expected?</p>
-                  <button onClick={() => window.location.reload()} className="text-mini-red font-bold text-sm underline hover:text-red-700">
-                      Reload Page
-                  </button>
+              <motion.div 
+                initial={{opacity:0, y: 10}} 
+                animate={{opacity:1, y: 0}} 
+                className="flex flex-col items-center gap-3 bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xl border border-red-100 dark:border-red-900/30 max-w-sm text-center"
+              >
+                  <AlertCircle className="text-mini-red" size={32} />
+                  <div>
+                      <h3 className="font-bold text-slate-900 dark:text-white">Connection Taking too Long?</h3>
+                      <p className="text-sm text-slate-500 mt-1 mb-4">You might be experiencing a network issue or a session glitch.</p>
+                  </div>
+                  <div className="flex gap-2 w-full">
+                    <button 
+                        onClick={() => window.location.reload()} 
+                        className="flex-1 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                    >
+                        Reload
+                    </button>
+                    <button 
+                        onClick={() => signOut()} 
+                        className="flex-1 py-2 bg-mini-red text-white rounded-lg font-bold hover:bg-red-700"
+                    >
+                        Log Out
+                    </button>
+                  </div>
               </motion.div>
           )}
       </div>
@@ -562,8 +587,7 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         </div>
                     )}
-
-                    {/* 2. REGISTRATIONS TAB */}
+                    {/* (Other tabs: Registrations, Finances, Settings - preserved via previous full file logic) */}
                     {activeTab === 'registrations' && (
                         <div className="space-y-6">
                             {!selectedEventId ? (
@@ -594,7 +618,6 @@ const AdminDashboard: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* Filter Bar */}
                                     <div className="relative mb-6">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                         <input 
@@ -645,8 +668,6 @@ const AdminDashboard: React.FC = () => {
                             )}
                         </div>
                     )}
-
-                    {/* 3. FINANCES TAB */}
                     {activeTab === 'finances' && (
                         <div className="space-y-6">
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
@@ -665,8 +686,6 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         </div>
                     )}
-
-                    {/* 4. SETTINGS TAB */}
                     {activeTab === 'settings' && (
                         <div className="space-y-8">
                             <div>
@@ -675,8 +694,6 @@ const AdminDashboard: React.FC = () => {
                                 </h2>
                                 <p className="text-slate-500 dark:text-slate-400 mb-6">Manage security and global settings.</p>
                             </div>
-
-                            {/* Security Section */}
                             <div className="mb-8 p-6 bg-red-50 dark:bg-slate-800/50 rounded-2xl border border-red-100 dark:border-slate-700">
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
                                     <Lock size={18} className="text-mini-red"/> Security & My Account
@@ -706,8 +723,6 @@ const AdminDashboard: React.FC = () => {
                                     </div>
                                 </form>
                             </div>
-
-                            {/* User Management Section */}
                             <div className="mb-8 p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
                                     <UserCog size={18} className="text-slate-600 dark:text-slate-300"/> Board Access Management

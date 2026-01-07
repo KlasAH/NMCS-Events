@@ -24,17 +24,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let mounted = true;
 
+    // GLOBAL SAFETY VALVE: Force loading to stop after 7 seconds no matter what
+    const safetyTimeout = setTimeout(() => {
+        if (mounted) {
+            setLoading((prev) => {
+                if (prev) {
+                    console.warn("AuthContext: Global safety timeout triggered. Forcing loading false.");
+                    return false;
+                }
+                return prev;
+            });
+        }
+    }, 7000);
+
     if (isDemoMode) {
       setLoading(false);
+      clearTimeout(safetyTimeout);
       return;
     }
 
     const initSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Wrap getSession in a timeout too, just in case Supabase client hangs
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<{data: {session: Session | null}}>((_, reject) => 
+            setTimeout(() => reject(new Error('getSession timeout')), 4000)
+        );
+
+        const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
+        
         if (mounted) {
           setSession(session);
-          await checkAdmin(session);
+          if (session) {
+             await checkAdmin(session);
+          } else {
+             setLoading(false);
+          }
         }
       } catch (error) {
         console.error('Error initializing session:', error);
@@ -49,12 +74,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (mounted) {
         setSession(session);
-        checkAdmin(session);
+        // Only trigger checkAdmin if we have a session. 
+        // If signing out (session null), isAdmin should be false.
+        if (session) {
+            checkAdmin(session);
+        } else {
+            setIsAdmin(false);
+            setLoading(false);
+        }
       }
     });
 
     return () => {
       mounted = false;
+      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -66,20 +99,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    // We don't want to set loading=true here if it's already false, 
+    // to avoid flickering UI on re-checks, unless it's the initial load.
+    // However, for safety in this specific debugging scenario, we handle state carefully below.
+
     try {
-        // Enforce a hard timeout using Promise.race
-        // If the DB check hangs, this ensures the app loads (as non-admin) after 5 seconds
         const isAdminResult = await Promise.race([
             performAdminCheck(currentSession),
             new Promise<boolean>((_, reject) => 
-                setTimeout(() => reject(new Error('Admin check timed out')), 5000)
+                setTimeout(() => reject(new Error('Admin check execution timed out')), 5000)
             )
         ]);
         
         setIsAdmin(isAdminResult);
     } catch (e) {
-        console.warn('Admin check timed out or failed:', e);
-        // Default to false on error so the app loads the "Restricted" screen instead of spinning forever
+        console.warn('Admin check failed or timed out:', e);
+        // On error, assume false to allow restricted access screen to show (instead of infinite spinner)
         setIsAdmin(false);
     } finally {
         setLoading(false);
@@ -89,33 +124,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const performAdminCheck = async (session: Session): Promise<boolean> => {
       try {
         // 1. Try RPC (preferred)
+        // We use maybeSingle or catch error to be safe
         const { data: rpcData, error: rpcError } = await supabase.rpc('is_admin');
         if (!rpcError && typeof rpcData === 'boolean') {
             return rpcData;
         }
 
-        // 2. Fallback: Direct Query
-        const { data: profile } = await supabase
+        console.log("RPC check failed, trying fallback tables...");
+
+        // 2. Fallback: Direct Query (Profiles)
+        // Be careful of RLS recursion here. If 'profiles' has a policy that calls 'is_admin', 
+        // and 'is_admin' queries 'profiles', we get a loop.
+        // We attempt to read 'role' directly.
+        const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', session.user.id)
-            .single();
+            .maybeSingle();
             
-        if (profile) {
+        if (!profileError && profile) {
             return profile.role === 'admin' || profile.role === 'board';
         }
         
-        // 3. Legacy Fallback
-        const { data: roleData } = await supabase
+        // 3. Legacy Fallback (User Roles)
+        const { data: roleData, error: roleError } = await supabase
             .from('user_roles')
             .select('role')
             .eq('user_id', session.user.id)
-            .single();
+            .maybeSingle();
 
-        return roleData?.role === 'admin' || roleData?.role === 'board';
+        if (!roleError && roleData) {
+            return roleData.role === 'admin' || roleData.role === 'board';
+        }
+
+        return false;
         
       } catch (err) {
-          console.error("Error during admin check execution:", err);
+          console.error("Exception during admin check:", err);
           return false;
       }
   };
@@ -129,6 +174,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await supabase.auth.signOut();
     setSession(null);
     setIsAdmin(false);
+    // Force reload to clear any weird cached states
+    window.location.reload();
   };
 
   const signIn = async (email: string) => {
