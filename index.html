@@ -8,10 +8,12 @@
     <!-- Red Car Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E21D38' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2'/%3E%3Ccircle cx='7' cy='17' r='3'/%3E%3Ccircle cx='17' cy='17' r='3'/%3E%3C/svg%3E" />
 
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CDN for immediate layout fix -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -23,8 +25,6 @@
             colors: {
               glass: "rgba(255, 255, 255, 0.7)",
               glassBorder: "rgba(255, 255, 255, 0.5)",
-              // We use CSS variables here so we can change the 'mini-red' 
-              // (which acts as our primary) dynamically via React state
               'mini-red': 'var(--mini-primary)', 
               'mini-black': '#111111',
               'mini-green': '#003323',
@@ -33,49 +33,24 @@
         },
       }
     </script>
-    <style>
-      :root {
-        --mini-primary: #E21D38; /* Default Chili Red */
-      }
-      body {
-        background-color: #f3f4f6;
-        font-family: 'Inter', sans-serif;
-        overflow-x: hidden;
-      }
-      .dark body {
-        background-color: #0f172a;
-      }
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-        background-color: #cbd5e1;
-        border-radius: 20px;
-      }
-      .dark ::-webkit-scrollbar-thumb {
-        background-color: #334155;
-      }
-    </style>
-<script type="importmap">
+
+  <script type="importmap">
 {
   "imports": {
-    "path": "https://esm.sh/path@^0.12.7",
-    "vite": "https://esm.sh/vite@^7.3.1",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
-    "url": "https://esm.sh/url@^0.11.4",
-    "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.0",
     "react-router-dom": "https://esm.sh/react-router-dom@^7.12.0",
     "framer-motion": "https://esm.sh/framer-motion@^12.24.10",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "react-qr-code": "https://esm.sh/react-qr-code@^2.0.18",
+    "date-fns": "https://esm.sh/date-fns@^4.1.0",
     "date-fns/": "https://esm.sh/date-fns@^4.1.0/",
-    "date-fns": "https://esm.sh/date-fns@^4.1.0"
+    "react-qr-code": "https://esm.sh/react-qr-code@^2.0.18",
+    "path": "https://esm.sh/path@^0.12.7",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "url": "https://esm.sh/url@^0.11.4"
   }
 }
 </script>

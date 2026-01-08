@@ -63,6 +63,9 @@ const Home: React.FC = () => {
   
   // Secret Login Logic
   const [secretClicks, setSecretClicks] = useState(0);
+  
+  // Secret Tester Logic
+  const [testerClicks, setTesterClicks] = useState(0);
   const navigate = useNavigate();
 
   // Tester Modal State
@@ -92,7 +95,7 @@ const Home: React.FC = () => {
     fetchMeetings();
   }, []);
 
-  // Reset secret clicks if inactive
+  // Reset secret clicks if inactive (Login)
   useEffect(() => {
       let timer: ReturnType<typeof setTimeout>;
       if (secretClicks > 0) {
@@ -100,9 +103,23 @@ const Home: React.FC = () => {
       }
       if (secretClicks >= 6) {
           navigate('/login');
+          setSecretClicks(0);
       }
       return () => clearTimeout(timer);
   }, [secretClicks, navigate]);
+
+  // Reset tester clicks if inactive (Tester)
+  useEffect(() => {
+      let timer: ReturnType<typeof setTimeout>;
+      if (testerClicks > 0) {
+          timer = setTimeout(() => setTesterClicks(0), 2000); // Reset after 2s of inactivity
+      }
+      if (testerClicks >= 6) {
+          setIsTesterOpen(true);
+          setTesterClicks(0);
+      }
+      return () => clearTimeout(timer);
+  }, [testerClicks]);
 
   const filteredMeetings = useMemo(() => {
     let filtered = [...meetings];
@@ -158,8 +175,8 @@ const Home: React.FC = () => {
             Est. 2001
         </div>
 
-        {/* Header Layout: [Car] [New Color Logo] [Title] [New Badge Logo] [Car] */}
-        <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8">
+        {/* Header Layout: [Car] [Logo Color] [Title] [Badge] [Car] */}
+        <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-8">
             
             {/* Left Group */}
             <div className="flex items-center gap-4">
@@ -175,13 +192,13 @@ const Home: React.FC = () => {
                     alt={`${currentTheme.name} Left`}
                 />
 
-                {/* Logo 1: Vectorized Color Copy */}
+                {/* Logo 1: NMCS Logo Color */}
                 <motion.img 
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.2 }}
                     src={getAssetUrl('logos/nmcs-logo-color.png')} 
-                    className="h-16 md:h-24 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
+                    className="h-16 md:h-20 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
                     alt="NMCS Club Logo"
                 />
             </div>
@@ -198,13 +215,13 @@ const Home: React.FC = () => {
 
             {/* Right Group */}
             <div className="flex items-center gap-4">
-                {/* Logo 2: In Car Badge */}
+                {/* Logo 2: Badge */}
                 <motion.img 
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.3 }}
                     src={getAssetUrl('logos/nmcs-badge.png')}
-                    className="h-16 md:h-24 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
+                    className="h-16 md:h-20 w-auto object-contain transition-all hover:scale-105 duration-300 drop-shadow-lg"
                     alt="NMCS Badge"
                 />
 
@@ -336,8 +353,11 @@ const Home: React.FC = () => {
                 <span className="text-slate-300 dark:text-slate-700 text-[10px]">|</span>
 
                 <button
-                    onClick={() => setIsTesterOpen(true)}
-                    className="text-[10px] font-medium text-slate-300 dark:text-slate-700 hover:text-mini-red transition-colors flex items-center gap-1"
+                    onClick={() => setTesterClicks(p => p + 1)}
+                    className={`text-[10px] font-medium transition-colors flex items-center gap-1 ${
+                        testerClicks > 0 ? 'text-mini-red' : 'text-slate-300 dark:text-slate-700 hover:text-mini-red'
+                    }`}
+                    title="Tryck 6 gånger för att testa databasen"
                 >
                     <Database size={10} /> Check Database Connection
                 </button>

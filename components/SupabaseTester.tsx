@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, ArrowRight, Check, Database, Server, X } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
 
@@ -10,13 +10,44 @@ interface SupabaseTesterProps {
     onClose: () => void;
 }
 
+const FIX_SQL = `
+-- Run this in your Supabase SQL Editor to fix permissions
+CREATE TABLE IF NOT EXISTS public.connection_tests (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  message TEXT,
+  response_data TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
+
+-- Allow everyone (including anonymous users) to use this table for testing
+CREATE POLICY "Public can test connection" ON public.connection_tests 
+FOR ALL USING (true) WITH CHECK (true);
+`;
+
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const [inputVal, setInputVal] = useState('');
     const [outputVal, setOutputVal] = useState<string | null>(null);
     const [status, setStatus] = useState<'idle' | 'writing' | 'reading' | 'success' | 'error'>('idle');
     const [logs, setLogs] = useState<string[]>([]);
+    const [copied, setCopied] = useState(false);
 
-    const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+    const addLog = (msg: string) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
+
+    const copySql = () => {
+        navigator.clipboard.writeText(FIX_SQL);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    // Helper to timeout a promise
+    const withTimeout = (promise: any, ms: number = 5000) => {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timed out. Check network or Database permissions.')), ms))
+        ]);
+    };
 
     const handleTest = async () => {
         if (!inputVal) return;
@@ -40,32 +71,45 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         }
 
         try {
-            // 1. WRITE
-            addLog(`Writing to 'connection_tests': "${inputVal}"`);
-            const { data: insertData, error: insertError } = await supabase
-                .from('connection_tests')
+            // STEP 1: PING (Simple Select)
+            addLog('Step 1: Pinging database...');
+            
+            const { count, error: pingError } = await withTimeout(
+                supabase.from('connection_tests').select('*', { count: 'exact', head: true })
+            );
+            
+            if (pingError) {
+                throw new Error(`Ping Failed: ${pingError.message}`);
+            }
+            addLog(`Ping successful. Table row count: ${count ?? 0}`);
+
+            // STEP 2: WRITE
+            addLog(`Step 2: Writing "${inputVal}"...`);
+            const { data: insertData, error: insertError } = await withTimeout(
+                supabase.from('connection_tests')
                 .insert([{ 
                     message: inputVal,
                     response_data: 'Server received: ' + inputVal
                 }])
                 .select()
-                .single();
+                .single()
+            );
 
-            if (insertError) throw insertError;
+            if (insertError) throw new Error(`Write Failed: ${insertError.message}`);
 
             addLog('Write successful. Row ID: ' + insertData.id);
             setStatus('reading');
 
-            // 2. READ BACK
-            // We read back the specific row we just inserted to prove round-trip
-            addLog('Reading back data from Supabase...');
-            const { data: readData, error: readError } = await supabase
-                .from('connection_tests')
+            // STEP 3: READ BACK
+            addLog('Step 3: Verifying data...');
+            const { data: readData, error: readError } = await withTimeout(
+                supabase.from('connection_tests')
                 .select('message')
                 .eq('id', insertData.id)
-                .single();
+                .single()
+            );
 
-            if (readError) throw readError;
+            if (readError) throw new Error(`Read Failed: ${readError.message}`);
 
             addLog(`Read successful. Value: "${readData.message}"`);
             setOutputVal(readData.message);
@@ -73,10 +117,16 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
         } catch (err: any) {
             console.error(err);
-            addLog('ERROR: ' + err.message || 'Unknown error');
-            if (err.message?.includes('relation "public.connection_tests" does not exist')) {
-                addLog('HINT: Did you run the latest SQL schema update?');
+            const msg = err.message || 'Unknown error';
+            addLog('ERROR: ' + msg);
+            
+            if (msg.includes('does not exist') || msg.includes('policy') || msg.includes('permission') || msg.includes('time out')) {
+                addLog('------------------------------------------------');
+                addLog('SOLUTION: Permissions missing.');
+                addLog('Use the "Copy SQL Fix" button below and run it in Supabase.');
+                addLog('------------------------------------------------');
             }
+
             setStatus('error');
         }
     };
@@ -85,7 +135,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         <Modal isOpen={isOpen} onClose={onClose} title="Database Handshake Tester">
             <div className="space-y-6">
                 <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl text-sm text-slate-600 dark:text-slate-300">
-                    <p>Use this tool to verify <strong>Read</strong> and <strong>Write</strong> permissions to the remote Supabase database.</p>
+                    <p>Verify <strong>Read</strong> and <strong>Write</strong> permissions to the remote Supabase database.</p>
                 </div>
 
                 {/* VISUALIZER */}
@@ -100,10 +150,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
                     {/* Connection Line */}
                     <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 px-16">
-                        <div className="h-1 bg-slate-200 dark:bg-slate-700 w-full rounded-full overflow-hidden">
+                        <div className="h-1 bg-slate-200 dark:bg-slate-700 w-full rounded-full overflow-hidden relative">
+                             <div className="absolute inset-0 bg-slate-200 dark:bg-slate-700"></div>
+                             {status === 'success' && <div className="absolute inset-0 bg-green-500"></div>}
+                             {status === 'error' && <div className="absolute inset-0 bg-red-500"></div>}
                             {(status === 'writing' || status === 'reading') && (
                                 <motion.div 
-                                    className="h-full bg-mini-red w-1/3"
+                                    className="h-full bg-mini-red w-1/3 absolute top-0"
                                     initial={{ x: '-100%' }}
                                     animate={{ x: '300%' }}
                                     transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
@@ -114,8 +167,12 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
                     {/* DB */}
                     <div className="flex flex-col items-center z-10">
-                         <div className={`p-4 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border-2 ${status === 'reading' || status === 'success' ? 'border-green-500' : 'border-transparent'}`}>
-                             <Database size={24} className="text-slate-700 dark:text-slate-200" />
+                         <div className={`p-4 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border-2 ${status === 'reading' || status === 'success' ? 'border-green-500' : status === 'error' ? 'border-red-500' : 'border-transparent'}`}>
+                             {status === 'error' ? (
+                                <AlertCircle size={24} className="text-red-500" />
+                             ) : (
+                                <Database size={24} className="text-slate-700 dark:text-slate-200" />
+                             )}
                         </div>
                         <span className="text-xs font-bold mt-2 text-slate-500">Supabase</span>
                     </div>
@@ -141,24 +198,35 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         </button>
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Read Result</label>
-                        <div className={`w-full p-3 rounded-xl border min-h-[50px] flex items-center
-                            ${status === 'success' ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300' : 
-                              status === 'error' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300' : 
-                              'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-400'}
-                        `}>
-                            {outputVal || (status === 'error' ? 'Connection Failed' : 'Waiting for data...')}
-                        </div>
-                        
-                        {/* Logs */}
-                        <div className="mt-3 bg-black/90 text-green-400 p-3 rounded-lg font-mono text-[10px] h-24 overflow-y-auto custom-scrollbar">
+                    <div className="flex flex-col h-full">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status Log</label>
+                        <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse min-h-[140px]">
                             {logs.length === 0 ? <span className="opacity-50">Ready to test...</span> : logs.map((log, i) => (
-                                <div key={i}>{log}</div>
+                                <div key={i} className="mb-1 border-b border-white/10 pb-1 last:border-0">{log}</div>
                             ))}
                         </div>
                     </div>
                 </div>
+
+                {/* SQL Fix Section - Only shows on error or always for convenience */}
+                {status === 'error' && (
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl p-4 flex items-center justify-between gap-4 animate-pulse">
+                        <div className="flex items-center gap-3">
+                            <AlertCircle className="text-red-500 shrink-0" size={24} />
+                            <div>
+                                <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Permissions Likely Missing</h4>
+                                <p className="text-xs text-red-600 dark:text-red-400">Run the fix script in your Supabase SQL Editor.</p>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={copySql}
+                            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
+                        >
+                            {copied ? <Check size={14} /> : <Copy size={14} />}
+                            {copied ? 'Copied!' : 'Copy SQL Fix'}
+                        </button>
+                    </div>
+                )}
             </div>
         </Modal>
     );
