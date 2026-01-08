@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { Activity, Database, Server, AlertCircle, Copy, Check } from 'lucide-react';
 import Modal from './Modal';
@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS public.connection_tests (
 
 ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
 
+-- Ensure policy exists (Drop first to avoid conflicts)
+DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
+
 -- Allow everyone (including anonymous users) to use this table for testing
 CREATE POLICY "Public can test connection" ON public.connection_tests 
 FOR ALL USING (true) WITH CHECK (true);
@@ -32,6 +35,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const [status, setStatus] = useState<'idle' | 'writing' | 'reading' | 'success' | 'error'>('idle');
     const [logs, setLogs] = useState<string[]>([]);
     const [copied, setCopied] = useState(false);
+    
+    // Timer ref to show "Waking up" messages
+    const coldStartTimer = useRef<any>(null);
 
     const addLog = (msg: string) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
 
@@ -42,10 +48,11 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     };
 
     // Helper to timeout a promise
-    const withTimeout = (promise: any, ms: number = 5000) => {
+    // Increased to 60000ms (60s) to handle Supabase "cold starts" on free tier
+    const withTimeout = (promise: any, ms: number = 60000) => {
         return Promise.race([
             promise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timed out. Check network or Database permissions.')), ms))
+            new Promise((_, reject) => setTimeout(() => reject(new Error(`Connection timed out (${ms/1000}s). Database might be paused (Free Tier) or permissions are missing.`)), ms))
         ]);
     };
 
@@ -56,8 +63,16 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         setOutputVal(null);
         setLogs([]);
         addLog('Initiating handshake...');
+        
+        if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+        
+        // Show a helpful message if it takes longer than 3 seconds
+        coldStartTimer.current = setTimeout(() => {
+             addLog('...still connecting. Database might be waking up (Free Tier). This can take up to 20s.');
+        }, 3000);
 
         if (isDemoMode) {
+            clearTimeout(coldStartTimer.current);
             setTimeout(() => {
                 addLog('Demo Mode: Simulating write...');
                 setStatus('reading');
@@ -78,6 +93,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 supabase.from('connection_tests').select('*', { count: 'exact', head: true })
             );
             
+            // Clear the "waking up" timer as soon as we get a response
+            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+
             if (pingError) {
                 throw new Error(`Ping Failed: ${pingError.message}`);
             }
@@ -116,14 +134,15 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             setStatus('success');
 
         } catch (err: any) {
+            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
             console.error(err);
             const msg = err.message || 'Unknown error';
             addLog('ERROR: ' + msg);
             
-            if (msg.includes('does not exist') || msg.includes('policy') || msg.includes('permission') || msg.includes('time out')) {
+            if (msg.includes('does not exist') || msg.includes('policy') || msg.includes('permission') || msg.includes('time out') || msg.includes('timed out')) {
                 addLog('------------------------------------------------');
-                addLog('SOLUTION: Permissions missing.');
-                addLog('Use the "Copy SQL Fix" button below and run it in Supabase.');
+                addLog('SOLUTION: If this is a Timeout, try again in 30s.');
+                addLog('If it is a Permission error, run the "Copy SQL Fix" script.');
                 addLog('------------------------------------------------');
             }
 
@@ -136,6 +155,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             <div className="space-y-6">
                 <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl text-sm text-slate-600 dark:text-slate-300">
                     <p>Verify <strong>Read</strong> and <strong>Write</strong> permissions to the remote Supabase database.</p>
+                    <p className="mt-2 text-xs text-slate-400">Note: On Supabase Free Tier, the first request after inactivity may take 10-20 seconds.</p>
                 </div>
 
                 {/* VISUALIZER */}

@@ -1,5 +1,5 @@
 
--- Enable UUID extension
+-- Enable UUID extension (Required for uuid_generate_v4)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. PROFILES TABLE
@@ -12,28 +12,22 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   car_model TEXT DEFAULT 'r53',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+-- Ensure columns exist (Migration safety)
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT DEFAULT 'r53';
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
--- MIGRATION HELPERS
-DO $$ 
-BEGIN 
-    BEGIN
-        ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
-    EXCEPTION
-        WHEN duplicate_column THEN RAISE NOTICE 'username column already exists';
-    END;
-    BEGIN
-        ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
-    EXCEPTION
-        WHEN duplicate_column THEN RAISE NOTICE 'full_name column already exists';
-    END;
-    BEGIN
-        ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT DEFAULT 'r53';
-    EXCEPTION
-        WHEN duplicate_column THEN RAISE NOTICE 'car_model column already exists';
-    END;
-END $$;
+-- 2. CONNECTION TESTS (Diagnostics)
+CREATE TABLE IF NOT EXISTS public.connection_tests (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  message TEXT,
+  response_data TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
 
--- 2. MEETINGS TABLE
+-- 3. MEETINGS TABLE
 CREATE TABLE IF NOT EXISTS public.meetings (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -51,8 +45,9 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   custom_data JSONB DEFAULT '{}'::jsonb,
   extra_info JSONB DEFAULT '[]'::jsonb
 );
+ALTER TABLE public.meetings ENABLE ROW LEVEL SECURITY;
 
--- 3. ITINERARY ITEMS
+-- 4. ITINERARY ITEMS
 CREATE TABLE IF NOT EXISTS public.itinerary_items (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -64,8 +59,9 @@ CREATE TABLE IF NOT EXISTS public.itinerary_items (
   location_map_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+ALTER TABLE public.itinerary_items ENABLE ROW LEVEL SECURITY;
 
--- 4. REGISTRATIONS
+-- 5. REGISTRATIONS
 CREATE TABLE IF NOT EXISTS public.registrations (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -78,8 +74,9 @@ CREATE TABLE IF NOT EXISTS public.registrations (
   status TEXT CHECK (status IN ('confirmed', 'pending', 'cancelled')) DEFAULT 'pending',
   registered_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+ALTER TABLE public.registrations ENABLE ROW LEVEL SECURITY;
 
--- 5. TRANSACTIONS
+-- 6. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS public.transactions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -89,44 +86,23 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   date DATE NOT NULL,
   category TEXT
 );
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 
--- 6. USER ROLES (Legacy)
+-- 7. USER ROLES (Legacy support)
 CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   role TEXT CHECK (role IN ('admin', 'board', 'user')) DEFAULT 'user',
   UNIQUE(user_id)
 );
+ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
--- 7. CONNECTION TESTS (New for diagnostics)
-CREATE TABLE IF NOT EXISTS public.connection_tests (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  message TEXT,
-  response_data TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- 8. STORAGE
+-- 8. STORAGE BUCKET
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('nmcs-assets', 'nmcs-assets', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
--- ENABLE RLS
-DO $$ 
-BEGIN
-    EXECUTE 'ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'ALTER TABLE public.meetings ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'ALTER TABLE public.itinerary_items ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'ALTER TABLE public.registrations ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY';
-EXCEPTION
-    WHEN others THEN NULL;
-END $$;
-
--- HELPER: IS_ADMIN
--- CRITICAL: SECURITY DEFINER allows this function to bypass RLS, avoiding infinite recursion loops
+-- 9. ADMIN FUNCTION
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
@@ -138,60 +114,62 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- CLEANUP OLD POLICIES (Comprehensive)
-DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
-DROP POLICY IF EXISTS "Users can insert their own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Public meetings are viewable by everyone" ON public.meetings;
-DROP POLICY IF EXISTS "Admins can insert meetings" ON public.meetings;
-DROP POLICY IF EXISTS "Admins can update meetings" ON public.meetings;
-DROP POLICY IF EXISTS "Admins can delete meetings" ON public.meetings;
-DROP POLICY IF EXISTS "Public itinerary is viewable by everyone" ON public.itinerary_items;
-DROP POLICY IF EXISTS "Admins can manage itinerary" ON public.itinerary_items;
-DROP POLICY IF EXISTS "Public can register" ON public.registrations;
-DROP POLICY IF EXISTS "Users can view own registrations" ON public.registrations;
-DROP POLICY IF EXISTS "Admins can view all registrations" ON public.registrations;
-DROP POLICY IF EXISTS "Admins can update registrations" ON public.registrations;
-DROP POLICY IF EXISTS "Admins can manage transactions" ON public.transactions;
-DROP POLICY IF EXISTS "Users can read own role" ON public.user_roles;
-DROP POLICY IF EXISTS "Admins can manage roles" ON public.user_roles;
-DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
-
--- POLICIES
+-- 10. POLICIES (Drop first to allow re-running script safely)
 
 -- Profiles
+DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+
 CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
+-- Connection Tests (Critical for Handshake Tester)
+DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
+CREATE POLICY "Public can test connection" ON public.connection_tests FOR ALL USING (true) WITH CHECK (true);
+
 -- Meetings
+DROP POLICY IF EXISTS "Public meetings are viewable by everyone" ON public.meetings;
+DROP POLICY IF EXISTS "Admins can insert meetings" ON public.meetings;
+DROP POLICY IF EXISTS "Admins can update meetings" ON public.meetings;
+DROP POLICY IF EXISTS "Admins can delete meetings" ON public.meetings;
+
 CREATE POLICY "Public meetings are viewable by everyone" ON public.meetings FOR SELECT USING (true);
 CREATE POLICY "Admins can insert meetings" ON public.meetings FOR INSERT WITH CHECK (is_admin());
 CREATE POLICY "Admins can update meetings" ON public.meetings FOR UPDATE USING (is_admin());
 CREATE POLICY "Admins can delete meetings" ON public.meetings FOR DELETE USING (is_admin());
 
 -- Itinerary
+DROP POLICY IF EXISTS "Public itinerary is viewable by everyone" ON public.itinerary_items;
+DROP POLICY IF EXISTS "Admins can manage itinerary" ON public.itinerary_items;
+
 CREATE POLICY "Public itinerary is viewable by everyone" ON public.itinerary_items FOR SELECT USING (true);
 CREATE POLICY "Admins can manage itinerary" ON public.itinerary_items FOR ALL USING (is_admin());
 
 -- Registrations
+DROP POLICY IF EXISTS "Public can register" ON public.registrations;
+DROP POLICY IF EXISTS "Users can view own registrations" ON public.registrations;
+DROP POLICY IF EXISTS "Admins can view all registrations" ON public.registrations;
+DROP POLICY IF EXISTS "Admins can update registrations" ON public.registrations;
+
 CREATE POLICY "Public can register" ON public.registrations FOR INSERT WITH CHECK (true);
 CREATE POLICY "Users can view own registrations" ON public.registrations FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Admins can view all registrations" ON public.registrations FOR SELECT USING (is_admin());
 CREATE POLICY "Admins can update registrations" ON public.registrations FOR UPDATE USING (is_admin());
 
 -- Transactions
+DROP POLICY IF EXISTS "Admins can manage transactions" ON public.transactions;
 CREATE POLICY "Admins can manage transactions" ON public.transactions FOR ALL USING (is_admin());
 
 -- User Roles
+DROP POLICY IF EXISTS "Users can read own role" ON public.user_roles;
+DROP POLICY IF EXISTS "Admins can manage roles" ON public.user_roles;
+
 CREATE POLICY "Users can read own role" ON public.user_roles FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Admins can manage roles" ON public.user_roles FOR ALL USING (is_admin());
 
--- Connection Tests (Allow everyone to read/write for diagnostics)
-CREATE POLICY "Public can test connection" ON public.connection_tests FOR ALL USING (true) WITH CHECK (true);
-
--- Storage Policies
+-- Storage
 DROP POLICY IF EXISTS "Public Access" ON storage.objects;
 DROP POLICY IF EXISTS "Auth Upload" ON storage.objects;
 DROP POLICY IF EXISTS "Auth Update" ON storage.objects;
@@ -202,13 +180,14 @@ CREATE POLICY "Auth Upload" ON storage.objects FOR INSERT WITH CHECK ( bucket_id
 CREATE POLICY "Auth Update" ON storage.objects FOR UPDATE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Delete" ON storage.objects FOR DELETE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 
--- TRIGGER: HANDLE NEW USER
+-- 11. TRIGGER: HANDLE NEW USER
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   extracted_username TEXT;
   extracted_fullname TEXT;
 BEGIN
+  -- Try to get metadata, fallback to email part
   extracted_username := COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
   extracted_fullname := COALESCE(new.raw_user_meta_data->>'full_name', 'New User');
 
