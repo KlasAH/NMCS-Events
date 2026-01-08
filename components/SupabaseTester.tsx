@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, Database, Server, AlertCircle, Copy, Check } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, Info } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
 
@@ -52,7 +52,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const withTimeout = (promise: any, ms: number = 60000) => {
         return Promise.race([
             promise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error(`Connection timed out (${ms/1000}s). Database might be paused (Free Tier) or permissions are missing.`)), ms))
+            new Promise((_, reject) => setTimeout(() => reject(new Error(`Connection timed out (${ms/1000}s).`)), ms))
         ]);
     };
 
@@ -62,13 +62,16 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         setStatus('writing');
         setOutputVal(null);
         setLogs([]);
+        
+        const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'Unknown';
+        addLog(`Target: ${envUrl.replace(/https:\/\/[^.]+\./, 'https://***.')}`);
         addLog('Initiating handshake...');
         
         if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
         
         // Show a helpful message if it takes longer than 3 seconds
         coldStartTimer.current = setTimeout(() => {
-             addLog('...still connecting. Database might be waking up (Free Tier). This can take up to 20s.');
+             addLog('...still connecting. Database might be waking up (Free Tier). This can take up to 20-30s.');
         }, 3000);
 
         if (isDemoMode) {
@@ -87,19 +90,24 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
         try {
             // STEP 1: PING (Simple Select)
+            // We use a lighter query to check connectivity first
             addLog('Step 1: Pinging database...');
             
-            const { count, error: pingError } = await withTimeout(
-                supabase.from('connection_tests').select('*', { count: 'exact', head: true })
+            const { error: pingError } = await withTimeout(
+                supabase.from('connection_tests').select('id').limit(1)
             );
             
             // Clear the "waking up" timer as soon as we get a response
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
 
             if (pingError) {
+                // If the table doesn't exist, we'll get a specific error code 42P01
+                if (pingError.code === '42P01') {
+                     throw new Error('Table "connection_tests" not found. Run the SQL Fix.');
+                }
                 throw new Error(`Ping Failed: ${pingError.message}`);
             }
-            addLog(`Ping successful. Table row count: ${count ?? 0}`);
+            addLog(`Ping successful. Connection established.`);
 
             // STEP 2: WRITE
             addLog(`Step 2: Writing "${inputVal}"...`);
@@ -139,10 +147,25 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             const msg = err.message || 'Unknown error';
             addLog('ERROR: ' + msg);
             
-            if (msg.includes('does not exist') || msg.includes('policy') || msg.includes('permission') || msg.includes('time out') || msg.includes('timed out')) {
+            // Heuristic diagnostics
+            if (msg.includes('timed out')) {
                 addLog('------------------------------------------------');
-                addLog('SOLUTION: If this is a Timeout, try again in 30s.');
-                addLog('If it is a Permission error, run the "Copy SQL Fix" script.');
+                addLog('TIMEOUT DIAGNOSIS:');
+                addLog('1. Is your Project paused? Check Supabase Dashboard.');
+                addLog('2. COOLIFY/DOCKER USERS: Are you using the Pooler?');
+                addLog('   Use Port 6543 and ?pgbouncer=true in connection strings.');
+                addLog('------------------------------------------------');
+            } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission')) {
+                addLog('------------------------------------------------');
+                addLog('PERMISSION DIAGNOSIS:');
+                addLog('The table or policies are missing.');
+                addLog('Run the "Copy SQL Fix" script in Supabase SQL Editor.');
+                addLog('------------------------------------------------');
+            } else if (msg.includes('too many clients') || msg.includes('remaining connection slots')) {
+                addLog('------------------------------------------------');
+                addLog('CONNECTION LIMIT REACHED:');
+                addLog('You are hitting the 60 connection limit.');
+                addLog('Use the Transaction Pooler (Port 6543).');
                 addLog('------------------------------------------------');
             }
 
@@ -222,7 +245,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status Log</label>
                         <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse min-h-[140px]">
                             {logs.length === 0 ? <span className="opacity-50">Ready to test...</span> : logs.map((log, i) => (
-                                <div key={i} className="mb-1 border-b border-white/10 pb-1 last:border-0">{log}</div>
+                                <div key={i} className="mb-1 border-b border-white/10 pb-1 last:border-0 break-all">{log}</div>
                             ))}
                         </div>
                     </div>
@@ -230,23 +253,46 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
                 {/* SQL Fix Section - Only shows on error or always for convenience */}
                 {status === 'error' && (
-                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl p-4 flex items-center justify-between gap-4 animate-pulse">
-                        <div className="flex items-center gap-3">
-                            <AlertCircle className="text-red-500 shrink-0" size={24} />
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl p-4 flex flex-col gap-4 animate-pulse">
+                        <div className="flex items-start gap-3">
+                            <AlertCircle className="text-red-500 shrink-0 mt-1" size={24} />
                             <div>
-                                <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Permissions Likely Missing</h4>
-                                <p className="text-xs text-red-600 dark:text-red-400">Run the fix script in your Supabase SQL Editor.</p>
+                                <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Connection Failed</h4>
+                                <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                    If this is a <strong>Timeout</strong>, your Project might be paused. Visit your Dashboard to wake it up.
+                                    <br/>
+                                    If this is a <strong>Permission/Table</strong> error, run the SQL Fix below.
+                                </p>
                             </div>
                         </div>
-                        <button 
-                            onClick={copySql}
-                            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
-                        >
-                            {copied ? <Check size={14} /> : <Copy size={14} />}
-                            {copied ? 'Copied!' : 'Copy SQL Fix'}
-                        </button>
+                        
+                        <div className="flex gap-2">
+                             <a 
+                                href="https://supabase.com/dashboard" 
+                                target="_blank" 
+                                rel="noreferrer"
+                                className="flex-1 flex items-center justify-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg font-bold text-xs hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                             >
+                                <ExternalLink size={14} /> Open Dashboard
+                             </a>
+                            <button 
+                                onClick={copySql}
+                                className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
+                            >
+                                {copied ? <Check size={14} /> : <Copy size={14} />}
+                                {copied ? 'Copied!' : 'Copy SQL Fix'}
+                            </button>
+                        </div>
                     </div>
                 )}
+                
+                <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl text-xs text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900/30 flex items-start gap-3">
+                     <Info size={16} className="shrink-0 mt-0.5" />
+                     <div>
+                         <strong>Using Coolify or Docker?</strong><br/>
+                         Ensure you are using the Transaction Pooler (Port 6543) and add <code>?pgbouncer=true</code> to your DATABASE_URL to avoid connection limit errors.
+                     </div>
+                </div>
             </div>
         </Modal>
     );
