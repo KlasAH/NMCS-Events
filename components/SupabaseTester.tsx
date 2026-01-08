@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, Info } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, Info, ShieldAlert } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
 
@@ -63,7 +63,25 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         setOutputVal(null);
         setLogs([]);
         
-        const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'Unknown';
+        // Use standard Vite env access safely
+        let envUrl = '';
+        try {
+            // @ts-ignore
+            if (typeof import.meta !== 'undefined' && import.meta.env) {
+                 // @ts-ignore
+                 envUrl = import.meta.env.VITE_SUPABASE_URL || '';
+            }
+        } catch (e) {
+            // ignore
+        }
+        
+        if (!envUrl) {
+            addLog('CRITICAL ERROR: VITE_SUPABASE_URL is missing!');
+            addLog('In Coolify/Docker, env vars MUST start with "VITE_".');
+            setStatus('error');
+            return;
+        }
+
         addLog(`Target: ${envUrl.replace(/https:\/\/[^.]+\./, 'https://***.')}`);
         addLog('Initiating handshake...');
         
@@ -147,25 +165,20 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             const msg = err.message || 'Unknown error';
             addLog('ERROR: ' + msg);
             
-            // Heuristic diagnostics
-            if (msg.includes('timed out')) {
+            // Heuristic diagnostics for Frontend/Vite
+            if (msg.includes('timed out') || msg.includes('Failed to fetch')) {
                 addLog('------------------------------------------------');
-                addLog('TIMEOUT DIAGNOSIS:');
-                addLog('1. Is your Project paused? Check Supabase Dashboard.');
-                addLog('2. COOLIFY/DOCKER USERS: Are you using the Pooler?');
-                addLog('   Use Port 6543 and ?pgbouncer=true in connection strings.');
+                addLog('TIMEOUT / CONNECTION DIAGNOSIS:');
+                addLog('1. Check VITE_SUPABASE_URL in Coolify Settings.');
+                addLog('2. Ensure Supabase project is ACTIVE (not paused).');
+                addLog('3. Check Browser Console for "Connection Refused".');
                 addLog('------------------------------------------------');
             } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission')) {
                 addLog('------------------------------------------------');
-                addLog('PERMISSION DIAGNOSIS:');
-                addLog('The table or policies are missing.');
-                addLog('Run the "Copy SQL Fix" script in Supabase SQL Editor.');
-                addLog('------------------------------------------------');
-            } else if (msg.includes('too many clients') || msg.includes('remaining connection slots')) {
-                addLog('------------------------------------------------');
-                addLog('CONNECTION LIMIT REACHED:');
-                addLog('You are hitting the 60 connection limit.');
-                addLog('Use the Transaction Pooler (Port 6543).');
+                addLog('RLS / PERMISSION DIAGNOSIS:');
+                addLog('The app cannot read data (Infinite Loading).');
+                addLog('You need a "SELECT" policy for "anon" role.');
+                addLog('Run the "Copy SQL Fix" script to test.');
                 addLog('------------------------------------------------');
             }
 
@@ -259,9 +272,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                             <div>
                                 <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Connection Failed</h4>
                                 <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                                    If this is a <strong>Timeout</strong>, your Project might be paused. Visit your Dashboard to wake it up.
+                                    <strong>Coolify/Docker User?</strong> Ensure your Env Vars start with <code>VITE_</code>.
                                     <br/>
-                                    If this is a <strong>Permission/Table</strong> error, run the SQL Fix below.
+                                    <strong>Infinite Loading?</strong> You might need a "SELECT" Policy for "anon" users (RLS).
                                 </p>
                             </div>
                         </div>
@@ -286,11 +299,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     </div>
                 )}
                 
-                <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl text-xs text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-900/30 flex items-start gap-3">
-                     <Info size={16} className="shrink-0 mt-0.5" />
+                <div className="bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-xl text-xs text-yellow-800 dark:text-yellow-300 border border-yellow-100 dark:border-yellow-900/30 flex items-start gap-3">
+                     <ShieldAlert size={16} className="shrink-0 mt-0.5" />
                      <div>
-                         <strong>Using Coolify or Docker?</strong><br/>
-                         Ensure you are using the Transaction Pooler (Port 6543) and add <code>?pgbouncer=true</code> to your DATABASE_URL to avoid connection limit errors.
+                         <strong>Coolify Deployment Tip</strong><br/>
+                         In Coolify "Environment Variables", keys MUST be <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_KEY</code>.
+                         <br/>
+                         If you use just <code>SUPABASE_URL</code>, the app will ignore them and fail silently.
                      </div>
                 </div>
             </div>
