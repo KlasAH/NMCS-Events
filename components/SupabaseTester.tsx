@@ -243,18 +243,23 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                             ? `${envKey.slice(0, 10)}...${envKey.slice(-5)}` 
                             : 'Too short to display';
                         addLog(`🔑 Used Key: ${safePreview}`);
-                        addLog(`📏 Length: ${envKey.length} chars`);
                         
                         if (envKey.startsWith('sb_')) {
-                            addLog('⛔ CRITICAL: WRONG SERVICE KEY');
-                            addLog('   You entered a STORYBLOK key ("sb_...").');
-                            addLog('   This app requires a SUPABASE key.');
+                            addLog('⛔ CRITICAL: RUNNING OLD KEY');
+                            addLog('   Current App Key: ' + safePreview);
                             addLog('   ');
-                            addLog('   CORRECT PATH IN SUPABASE DASHBOARD:');
-                            addLog('   1. Click "Data API" (left menu).');
-                            addLog('   2. Look for "Project API keys".');
-                            addLog('   3. Copy the "anon" / "public" key.');
-                            addLog('   4. It MUST start with "ey...".');
+                            addLog('   DID YOU UPDATE COOLIFY?');
+                            addLog('   If you already updated the key in Coolify to "ey...",');
+                            addLog('   then this app is running an OLD BUILD.');
+                            addLog('   ');
+                            addLog('   SOLUTION:');
+                            addLog('   1. Go to Coolify.');
+                            addLog('   2. Click "Redeploy" (Ensure "Build" is checked).');
+                            addLog('   3. Refresh this page after deployment finishes.');
+                        } else if (envKey.startsWith('eyJhb')) {
+                            addLog('✅ Prefix "eyJhb" detected (Standard Supabase).');
+                            addLog('   Key format is correct, but server rejected it.');
+                            addLog('   Check if the project is "Paused" in Supabase.');
                         } else if (!envKey.startsWith('ey')) {
                             addLog('⚠️ WARNING: Key does not start with "ey".');
                             addLog('   Supabase keys are JWTs and usually start with "ey".');
