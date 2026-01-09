@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -122,7 +123,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         ]);
     };
 
-    const fetchLatestRows = async () => {
+    const fetchLatestRows = async (customClient?: any) => {
+        const client = customClient || supabase;
+
         if (isDemoMode) {
             setTableRows([
                 { id: 'mock-1', message: 'Demo Data 1', created_at: new Date().toISOString() },
@@ -131,16 +134,15 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return;
         }
 
-        const { data, error } = await supabase
+        const { data, error } = await client
             .from('connection_tests')
             .select('*')
             .order('created_at', { ascending: false })
             .limit(5);
         
         if (error) {
-            if (error.code !== 'PGRST116') {
-                 // console.error(error); 
-            }
+            // Log error so user knows why the table is empty
+            addLog(`Table Refresh Failed: ${error.message} (${error.code || 'No Code'})`);
         } else {
             setTableRows(data || []);
         }
@@ -373,7 +375,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             setOutputVal(readData.message);
             setStatus('success');
             
-            fetchLatestRows();
+            // USE THE WORKING CLIENT TO REFRESH THE TABLE
+            // This ensures data is visible even if global client is broken
+            await fetchLatestRows(testClient);
 
         } catch (err: any) {
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
@@ -528,7 +532,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 <div>
                     <div className="flex items-center justify-between mb-2">
                         <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Stored Data (Last 5)</label>
-                        <button onClick={fetchLatestRows} className="text-xs text-blue-500 hover:underline flex items-center gap-1">
+                        <button onClick={() => fetchLatestRows()} className="text-xs text-blue-500 hover:underline flex items-center gap-1">
                             <RefreshCw size={10} /> Refresh
                         </button>
                     </div>
