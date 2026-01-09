@@ -123,6 +123,31 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         ]);
     };
 
+    // Helper: Create a fresh client (bypassing global singleton issues)
+    const getFreshClient = () => {
+        let envUrl = '';
+        let envKey = '';
+        try {
+            // @ts-ignore
+            if (typeof import.meta !== 'undefined' && import.meta.env) {
+                 // @ts-ignore
+                 envUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/^['"]|['"]$/g, '').trim();
+                 envUrl = envUrl.replace(/\/$/, '');
+                 
+                 // @ts-ignore
+                 envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').replace(/^['"]|['"]$/g, '').trim();
+            }
+        } catch (e) {
+            console.error(e);
+        }
+        
+        if (!envUrl || !envKey) return null;
+
+        return createClient(envUrl, envKey, {
+            auth: { persistSession: false }
+        });
+    };
+
     const fetchLatestRows = async (customClient?: any) => {
         const client = customClient || supabase;
 
@@ -141,7 +166,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             .limit(5);
         
         if (error) {
-            // Log error so user knows why the table is empty
             addLog(`Table Refresh Failed: ${error.message} (${error.code || 'No Code'})`);
         } else {
             setTableRows(data || []);
@@ -191,7 +215,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             if (typeof import.meta !== 'undefined' && import.meta.env) {
                  // @ts-ignore
                  envUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/^['"]|['"]$/g, '').trim();
-                 // Remove trailing slash if present
                  envUrl = envUrl.replace(/\/$/, '');
                  
                  // @ts-ignore
@@ -323,7 +346,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             }, 5000);
 
             // CRITICAL: Create a fresh, isolated client using the keys we just verified.
-            // This ensures we are not using any global config/timeouts that might be broken.
             const testClient = createClient(envUrl, envKey, {
                 auth: { persistSession: false } // Pure data test, no auth overhead
             });
@@ -376,7 +398,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             setStatus('success');
             
             // USE THE WORKING CLIENT TO REFRESH THE TABLE
-            // This ensures data is visible even if global client is broken
             await fetchLatestRows(testClient);
 
         } catch (err: any) {
@@ -411,27 +432,56 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     };
 
     const handleDelete = async (id: string) => {
+        if (isDemoMode) {
+            setTableRows(prev => prev.filter(r => r.id !== id));
+            addLog('Demo Mode: Deleted locally.');
+            return;
+        }
+
+        // Create a fresh client to bypass global auth issues
+        const client = getFreshClient();
+        if (!client) {
+            addLog('ERROR: Could not create Supabase client (Missing Env Vars?)');
+            return;
+        }
+
         addLog(`Deleting row ${id.slice(0, 8)}...`);
-        const { error } = await supabase.from('connection_tests').delete().eq('id', id);
+        const { error } = await client.from('connection_tests').delete().eq('id', id);
+        
         if (error) {
             addLog(`Delete Failed: ${error.message}`);
             if (error.message.includes('policy')) addLog('Hint: Run the SQL Fix below to enable Deletes.');
         } else {
             addLog('Delete successful.');
-            fetchLatestRows();
+            fetchLatestRows(client);
         }
     };
 
     const handleUpdate = async (id: string) => {
+        if (isDemoMode) {
+            setTableRows(prev => prev.map(r => r.id === id ? { ...r, message: editValue } : r));
+            setEditingId(null);
+            addLog('Demo Mode: Updated locally.');
+            return;
+        }
+
+        // Create a fresh client to bypass global auth issues
+        const client = getFreshClient();
+        if (!client) {
+            addLog('ERROR: Could not create Supabase client (Missing Env Vars?)');
+            return;
+        }
+
         addLog(`Updating row ${id.slice(0, 8)}...`);
-        const { error } = await supabase.from('connection_tests').update({ message: editValue }).eq('id', id);
+        const { error } = await client.from('connection_tests').update({ message: editValue }).eq('id', id);
+        
         if (error) {
             addLog(`Update Failed: ${error.message}`);
             if (error.message.includes('policy')) addLog('Hint: Run the SQL Fix below to enable Updates.');
         } else {
             addLog('Update successful.');
             setEditingId(null);
-            fetchLatestRows();
+            fetchLatestRows(client);
         }
     };
 
