@@ -65,6 +65,13 @@ DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
 
 CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT USING (true);
+
+-- 3. FIX: Performance "Unindexed Foreign Keys"
+CREATE INDEX IF NOT EXISTS idx_itinerary_meeting_id ON public.itinerary_items(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_registrations_meeting_id ON public.registrations(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_registrations_user_id ON public.registrations(user_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_meeting_id ON public.transactions(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON public.user_roles(user_id);
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
@@ -271,13 +278,14 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         <Modal isOpen={isOpen} onClose={onClose} title="Connection Troubleshooter">
             <div className="space-y-6">
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-sm text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
-                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Security Warnings Detected</h4>
+                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Security & Performance Updates</h4>
                     <p className="text-xs mb-2">
-                        Your dashboard reported security issues regarding "Mutable Search Path" and "Overly Permissive RLS".
+                        Updates available for "Mutable Search Path", "RLS Policies", and "Missing Indexes".
                     </p>
                     <ul className="list-disc ml-4 space-y-1 text-xs">
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
-                        <li><strong>RLS Policy:</strong> Tightened <code>connection_tests</code> policies to prevent unrestricted deletion.</li>
+                        <li><strong>RLS Policy:</strong> Tightened <code>connection_tests</code> policies.</li>
+                        <li><strong>Performance:</strong> Added indexes for foreign keys (itinerary, registrations, etc).</li>
                     </ul>
                 </div>
 
@@ -356,9 +364,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     <div className="flex items-start gap-3">
                         <Database className="text-slate-500 shrink-0 mt-1" size={20} />
                         <div>
-                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm">Apply Security Fixes</h4>
+                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm">Apply Database Fixes</h4>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                Run this SQL to fix "Mutable Search Path" and RLS policies.
+                                Run this SQL to fix Security Warnings and Performance Issues.
                             </p>
                         </div>
                     </div>
