@@ -2,7 +2,11 @@
 -- Enable UUID extension (Required for uuid_generate_v4)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. PROFILES TABLE
+-- 1. CLEANUP
+-- Use CASCADE to remove dependent policies (fixes ERROR: 2BP01)
+DROP FUNCTION IF EXISTS public.is_board() CASCADE;
+
+-- 2. PROFILES TABLE
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
@@ -18,7 +22,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT DEFAULT 'r53';
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
--- 2. CONNECTION TESTS (Diagnostics)
+-- 3. CONNECTION TESTS (Diagnostics)
 CREATE TABLE IF NOT EXISTS public.connection_tests (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   message TEXT,
@@ -27,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.connection_tests (
 );
 ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
 
--- 3. MEETINGS TABLE
+-- 4. MEETINGS TABLE
 CREATE TABLE IF NOT EXISTS public.meetings (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -47,7 +51,7 @@ CREATE TABLE IF NOT EXISTS public.meetings (
 );
 ALTER TABLE public.meetings ENABLE ROW LEVEL SECURITY;
 
--- 4. ITINERARY ITEMS
+-- 5. ITINERARY ITEMS
 CREATE TABLE IF NOT EXISTS public.itinerary_items (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -61,7 +65,7 @@ CREATE TABLE IF NOT EXISTS public.itinerary_items (
 );
 ALTER TABLE public.itinerary_items ENABLE ROW LEVEL SECURITY;
 
--- 5. REGISTRATIONS
+-- 6. REGISTRATIONS
 CREATE TABLE IF NOT EXISTS public.registrations (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -76,7 +80,7 @@ CREATE TABLE IF NOT EXISTS public.registrations (
 );
 ALTER TABLE public.registrations ENABLE ROW LEVEL SECURITY;
 
--- 6. TRANSACTIONS
+-- 7. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS public.transactions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
@@ -88,7 +92,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 );
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 
--- 7. USER ROLES (Legacy support)
+-- 8. USER ROLES (Legacy support)
 CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
@@ -97,12 +101,12 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
 );
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
--- 8. STORAGE BUCKET
+-- 9. STORAGE BUCKET
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('nmcs-assets', 'nmcs-assets', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
--- 9. ADMIN FUNCTION (SECURED)
+-- 10. ADMIN FUNCTION (SECURED)
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN 
 LANGUAGE plpgsql 
@@ -117,7 +121,7 @@ BEGIN
 END;
 $$;
 
--- 10. POLICIES (Drop first to allow re-running script safely)
+-- 11. POLICIES (Drop first to allow re-running script safely)
 
 -- Profiles
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
@@ -128,17 +132,17 @@ CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR 
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
--- Connection Tests (Fixed: Split policies to avoid ALL permissiveness, allow full CRUD for testing tool)
+-- Connection Tests (Fixed: Secure Public Access)
 DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can update tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can delete tests" ON public.connection_tests;
 
-CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT WITH CHECK (true);
-CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT USING (true);
-CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE USING (true);
-CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE USING (true);
+CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE TO anon, authenticated USING (true);
 
 -- Meetings
 DROP POLICY IF EXISTS "Public meetings are viewable by everyone" ON public.meetings;
@@ -191,7 +195,7 @@ CREATE POLICY "Auth Upload" ON storage.objects FOR INSERT WITH CHECK ( bucket_id
 CREATE POLICY "Auth Update" ON storage.objects FOR UPDATE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Delete" ON storage.objects FOR DELETE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 
--- 11. TRIGGER: HANDLE NEW USER (SECURED)
+-- 12. TRIGGER: HANDLE NEW USER (SECURED)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER 
 LANGUAGE plpgsql 
@@ -227,7 +231,7 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
--- 12. PERFORMANCE INDEXES (Fix Unindexed Foreign Keys)
+-- 13. PERFORMANCE INDEXES (Fix Unindexed Foreign Keys)
 CREATE INDEX IF NOT EXISTS idx_itinerary_meeting_id ON public.itinerary_items(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_meeting_id ON public.registrations(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_user_id ON public.registrations(user_id);

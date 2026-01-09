@@ -10,7 +10,12 @@ interface SupabaseTesterProps {
 }
 
 const FIX_SQL = `
--- 1. FIX: Security Warning "Mutable Search Path"
+-- 1. CLEANUP: Remove deprecated functions causing warnings
+-- Use CASCADE to remove dependent policies (fixes ERROR: 2BP01)
+DROP FUNCTION IF EXISTS public.is_board() CASCADE;
+
+-- 2. FIX: Security Warning "Mutable Search Path"
+-- Added 'SET search_path = public' to secure functions
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN 
 LANGUAGE plpgsql 
@@ -48,8 +53,8 @@ BEGIN
 END;
 $$;
 
--- 2. FIX: Security Warning & Enable Full CRUD for Tester
--- We replace the loose "ALL" policy with specific policies allowing public access for this test table.
+-- 3. FIX: Enable Full CRUD for Tester
+-- Explicitly targeting anon and authenticated roles to be specific
 CREATE TABLE IF NOT EXISTS public.connection_tests (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   message TEXT,
@@ -65,12 +70,12 @@ DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can update tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can delete tests" ON public.connection_tests;
 
-CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT WITH CHECK (true);
-CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT USING (true);
-CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE USING (true);
-CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE USING (true);
+CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE TO anon, authenticated USING (true);
 
--- 3. FIX: Performance "Unindexed Foreign Keys"
+-- 4. FIX: Performance "Unindexed Foreign Keys"
 CREATE INDEX IF NOT EXISTS idx_itinerary_meeting_id ON public.itinerary_items(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_meeting_id ON public.registrations(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_user_id ON public.registrations(user_id);
@@ -125,7 +130,10 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             .limit(5);
         
         if (error) {
-            addLog(`Fetch Error: ${error.message}`);
+            // Don't log basic empty table errors, only connectivity/auth errors
+            if (error.code !== 'PGRST116') {
+                 addLog(`Fetch Error: ${error.message}`);
+            }
         } else {
             setTableRows(data || []);
         }
@@ -216,6 +224,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 
                 if (response.ok || response.status === 404) {
                     addLog(`Network OK. Status: ${response.status}`);
+                } else if (response.status === 401) {
+                    addLog('CRITICAL ERROR: 401 Unauthorized.');
+                    addLog('Your VITE_SUPABASE_ANON_KEY is invalid.');
+                    addLog('Action: Check your Coolify Environment Variables.');
+                    setStatus('error');
+                    if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+                    return; // ABORT - No need to try SDK
                 } else {
                     addLog(`Network Warning. Server replied: ${response.status} ${response.statusText}`);
                 }
@@ -295,6 +310,11 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 addLog('------------------------------------------------');
                 addLog('DIAGNOSIS: RLS / PERMISSIONS');
                 addLog('Run the "Copy SQL Fix" script below.');
+                addLog('------------------------------------------------');
+            } else if (msg.includes('401')) {
+                addLog('------------------------------------------------');
+                addLog('DIAGNOSIS: INVALID API KEY');
+                addLog('Your Anon Key is incorrect or expired.');
                 addLog('------------------------------------------------');
             }
 
