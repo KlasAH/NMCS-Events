@@ -10,12 +10,16 @@ interface SupabaseTesterProps {
 }
 
 const FIX_SQL = `
--- 1. CLEANUP: Remove deprecated functions causing warnings
--- Use CASCADE to remove dependent policies (fixes ERROR: 2BP01)
+-- 1. CLEANUP: PREVENT DEPENDENCY ERRORS (2BP01)
+-- Explicitly drop old policies that depend on is_board() BEFORE dropping the function
+DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations;
+DROP POLICY IF EXISTS "Board sees finances" ON public.transactions;
+DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations; 
+
+-- Now it is safe to drop the function
 DROP FUNCTION IF EXISTS public.is_board() CASCADE;
 
 -- 2. FIX: Security Warning "Mutable Search Path"
--- Added 'SET search_path = public' to secure functions
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN 
 LANGUAGE plpgsql 
@@ -54,7 +58,6 @@ END;
 $$;
 
 -- 3. FIX: Enable Full CRUD for Tester & Resolve "Always True" Warning
--- We replace explicit TRUE with a role check to satisfy the Security Advisor linter
 CREATE TABLE IF NOT EXISTS public.connection_tests (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   message TEXT,
@@ -243,7 +246,11 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         addLog(`🔑 Used Key: ${safePreview}`);
                         addLog(`📏 Length: ${envKey.length} chars`);
                         
-                        if (!envKey.startsWith('ey')) {
+                        if (envKey.startsWith('sb_')) {
+                            addLog('⛔ CRITICAL: This looks like a Storyblok key ("sb_...").');
+                            addLog('   You have pasted the wrong key in Coolify!');
+                            addLog('   Get the "anon" key from Supabase Dashboard.');
+                        } else if (!envKey.startsWith('ey')) {
                             addLog('⚠️ WARNING: Key does not start with "ey". It should be a JWT.');
                         } else {
                             addLog('✅ Format: Looks like a valid JWT (starts with ey).');
@@ -251,9 +258,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     }
                     addLog('-----------------------');
                     addLog('SOLUTIONS:');
-                    addLog('1. Did you rebuild AFTER changing keys? (Build vars are baked in)');
-                    addLog('2. Check for quotes/spaces in Coolify variables.');
-                    addLog('3. Verify key matches "anon" in Supabase Dashboard.');
+                    addLog('1. Replace VITE_SUPABASE_ANON_KEY in Coolify with correct key.');
+                    addLog('2. Rebuild the app (Environment variables are baked in).');
 
                     setStatus('error');
                     if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
@@ -380,15 +386,15 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-sm text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
                     <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Security & Performance Updates</h4>
                     <p className="text-xs mb-2">
-                        Updates available for "Security Advisor Warnings", "Permissions", and "Missing Indexes".
+                        Updates available for "Dependency Errors (2BP01)", "Security Advisor", and "Permissions".
                     </p>
                     <ul className="list-disc ml-4 space-y-1 text-xs">
+                        <li><strong>Fixed Dependency Error (2BP01):</strong> SQL now explicitly drops old "Board" policies before dropping functions.</li>
                         <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks <code>auth.role() IN (...)</code> to satisfy security linter.</li>
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
-                        <li><strong>Performance:</strong> Added indexes for foreign keys (itinerary, registrations, etc).</li>
                     </ul>
                     <p className="mt-2 text-xs opacity-80 italic">
-                        Note: "Leaked Password Protection" and "MFA Options" warnings must be fixed manually in the Supabase Dashboard (Auth &gt; Security).
+                        Note: "Leaked Password Protection" warnings must be fixed manually in the Supabase Dashboard.
                     </p>
                 </div>
 

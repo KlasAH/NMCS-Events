@@ -2,8 +2,13 @@
 -- Enable UUID extension (Required for uuid_generate_v4)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. CLEANUP
--- Use CASCADE to remove dependent policies (fixes ERROR: 2BP01)
+-- 1. CLEANUP: PREVENT DEPENDENCY ERRORS (2BP01)
+-- Explicitly drop old policies that depend on is_board() BEFORE dropping the function
+DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations;
+DROP POLICY IF EXISTS "Board sees finances" ON public.transactions;
+DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations; 
+
+-- Now it is safe to drop the function
 DROP FUNCTION IF EXISTS public.is_board() CASCADE;
 
 -- 2. PROFILES TABLE
