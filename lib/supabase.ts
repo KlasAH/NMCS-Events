@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 
 // Access environment variables safely for Vite
@@ -52,8 +53,8 @@ if (isMissingKeys) {
 // We detect "placeholder" which is sometimes set by default in templates
 export const isDemoMode = isMissingKeys || supabaseUrl.includes('placeholder');
 
-const finalUrl = isDemoMode ? 'https://placeholder.supabase.co' : supabaseUrl;
-const finalKey = isDemoMode ? 'placeholder' : supabaseAnonKey;
+export const finalUrl = isDemoMode ? 'https://placeholder.supabase.co' : supabaseUrl;
+export const finalKey = isDemoMode ? 'placeholder' : supabaseAnonKey;
 
 // Create client with specific configuration for connection stability
 export const supabase = createClient(finalUrl, finalKey, {

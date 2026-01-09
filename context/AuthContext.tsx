@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase, isDemoMode } from '../lib/supabase';
-import { Session, Provider } from '@supabase/supabase-js';
+import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
+import { Session, Provider, createClient } from '@supabase/supabase-js';
 
 interface AuthContextType {
   session: Session | null;
@@ -69,8 +69,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const checkLogic = async () => {
           let adminStatus = false;
 
-          // 1. PRIMARY CHECK: Check the 'profiles' table directly.
-          const { data: profile, error: profileError } = await supabase
+          // CRITICAL: Create a scoped client with the specific access token.
+          // This ensures the request is definitely authenticated with the current user,
+          // bypassing any global client race conditions.
+          const scopedClient = createClient(finalUrl, finalKey, {
+              global: {
+                  headers: {
+                      Authorization: `Bearer ${currentSession.access_token}`
+                  }
+              }
+          });
+
+          // 1. PRIMARY CHECK: Check the 'profiles' table directly using the scoped client.
+          const { data: profile, error: profileError } = await scopedClient
             .from('profiles')
             .select('role')
             .eq('id', currentSession.user.id)
@@ -78,7 +89,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (profile) {
               console.log(`[Auth] Profile role found: ${profile.role}`);
-              if (profile.role === 'admin' || profile.role === 'board') {
+              const role = (profile.role || '').toLowerCase().trim();
+              if (role === 'admin' || role === 'board') {
                   adminStatus = true;
               }
           } else if (profileError) {
@@ -87,16 +99,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           // 2. FALLBACK: Try RPC if profile check was inconclusive or failed
           if (!adminStatus) {
-            const { data: rpcIsAdmin, error: rpcError } = await supabase.rpc('is_admin');
+            // Use scoped client for RPC as well
+            const { data: rpcIsAdmin, error: rpcError } = await scopedClient.rpc('is_admin');
             if (!rpcError && rpcIsAdmin === true) {
                 console.log("[Auth] RPC 'is_admin' returned true");
                 adminStatus = true;
+            } else if (rpcError) {
+                console.warn("[Auth] RPC error:", rpcError.message);
             }
           }
 
           // 3. LEGACY FALLBACK: Check 'user_roles' table
           if (!adminStatus) {
-            const { data: roleData } = await supabase
+            const { data: roleData } = await scopedClient
                 .from('user_roles')
                 .select('role')
                 .eq('user_id', currentSession.user.id)

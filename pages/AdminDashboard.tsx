@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Bug } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem } from '../types';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -140,6 +140,31 @@ const AdminDashboard: React.FC = () => {
                 <p className="text-slate-600 dark:text-slate-300 mb-6 text-lg">
                     This dashboard is reserved for <span className="font-bold text-mini-black dark:text-white">NMCS Board Members</span>.
                 </p>
+
+                {/* DEBUG INFO FOR USER */}
+                <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-xl mb-6 text-left border border-slate-200 dark:border-slate-700">
+                    <h4 className="font-bold text-xs text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-2">
+                        <Bug size={14} /> Debug Information
+                    </h4>
+                    <div className="space-y-1 font-mono text-xs text-slate-700 dark:text-slate-300 break-all">
+                        <p><strong>Your User ID:</strong> {session.user.id}</p>
+                        <p><strong>Email:</strong> {session.user.email}</p>
+                        <div className="pt-2">
+                            <button 
+                                onClick={async () => {
+                                    alert("Fetching your profile from DB...");
+                                    const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                                    if(error) alert("Error fetching profile: " + error.message);
+                                    else alert("Profile Data:\n" + JSON.stringify(data, null, 2));
+                                }}
+                                className="text-mini-red hover:underline font-bold"
+                            >
+                                Run Diagnostics Check
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="bg-slate-50 dark:bg-slate-800 p-6 rounded-xl text-left text-sm text-slate-600 dark:text-slate-400 mb-8 border border-slate-100 dark:border-slate-700">
                     <p className="font-bold mb-3 flex items-center gap-2 text-slate-900 dark:text-white text-base">
                         <UserCog size={18}/> Board Member Setup:
@@ -148,7 +173,7 @@ const AdminDashboard: React.FC = () => {
                     <ol className="list-decimal ml-5 space-y-2 marker:text-mini-red marker:font-bold">
                         <li>Go to <strong>Supabase Dashboard</strong> &gt; <strong>Table Editor</strong></li>
                         <li>Open the <code>profiles</code> table</li>
-                        <li>Find the user row (check email or username)</li>
+                        <li>Find the user row with ID: <code className="bg-slate-200 dark:bg-slate-900 px-1 rounded">{session.user.id.slice(0,8)}...</code></li>
                         <li>Change the <code>role</code> column to <code>board</code> or <code>admin</code></li>
                         <li>Click <strong>Save</strong></li>
                     </ol>
