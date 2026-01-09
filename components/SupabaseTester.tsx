@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer, Globe } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
 
@@ -10,7 +10,46 @@ interface SupabaseTesterProps {
 }
 
 const FIX_SQL = `
--- Run this in your Supabase SQL Editor to fix permissions
+-- 1. FIX: Security Warning "Mutable Search Path"
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN 
+LANGUAGE plpgsql 
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'board')
+  ) OR EXISTS (
+    SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role IN ('admin', 'board')
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
+  extracted_username TEXT;
+  extracted_fullname TEXT;
+BEGIN
+  extracted_username := COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
+  extracted_fullname := COALESCE(new.raw_user_meta_data->>'full_name', 'New User');
+
+  INSERT INTO public.profiles (id, email, full_name, username, role)
+  VALUES (new.id, new.email, extracted_fullname, extracted_username, 'user')
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    full_name = EXCLUDED.full_name,
+    username = EXCLUDED.username;
+    
+  RETURN new;
+END;
+$$;
+
+-- 2. FIX: Security Warning "RLS Policy Always True" for connection tests
+-- We replace the loose "ALL" policy with specific INSERT/SELECT policies
 CREATE TABLE IF NOT EXISTS public.connection_tests (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   message TEXT,
@@ -20,12 +59,12 @@ CREATE TABLE IF NOT EXISTS public.connection_tests (
 
 ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
 
--- Ensure policy exists (Drop first to avoid conflicts)
 DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
+DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
+DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
 
--- Allow everyone (including anonymous users) to use this table for testing
-CREATE POLICY "Public can test connection" ON public.connection_tests 
-FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT USING (true);
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
@@ -64,11 +103,15 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         
         // Use standard Vite env access safely
         let envUrl = '';
+        let envKey = '';
         try {
             // @ts-ignore
             if (typeof import.meta !== 'undefined' && import.meta.env) {
                  // @ts-ignore
-                 envUrl = import.meta.env.VITE_SUPABASE_URL || '';
+                 // Sanitize here too just in case
+                 envUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/^['"]|['"]$/g, '').trim();
+                 // @ts-ignore
+                 envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').replace(/^['"]|['"]$/g, '').trim();
             }
         } catch (e) {
             // ignore
@@ -81,8 +124,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return;
         }
 
+        // Sanitized check
+        if (envUrl.includes('"') || envUrl.includes("'") || envUrl.includes(" ")) {
+            addLog('ERROR: URL contains invalid characters (quotes/spaces).');
+            addLog('We attempted to clean it, but check your Coolify settings.');
+        }
+
         addLog(`Target: ${envUrl.replace(/https:\/\/[^.]+\./, 'https://***.')}`);
-        addLog('Initiating handshake (Timeout set to 60s)...');
         
         if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
         
@@ -108,8 +156,42 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         }
 
         try {
-            // STEP 1: PING (Simple Select)
-            addLog('Step 1: Pinging database...');
+            // STEP 0: DIRECT HTTP CHECK (Bypassing SDK)
+            // This proves if we can actually reach the internet/server
+            addLog('Step 0: Network Reachability Check...');
+            try {
+                // Ping the Supabase REST endpoint root
+                const restUrl = `${envUrl}/rest/v1/`;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for pure ping
+                
+                const response = await fetch(restUrl, {
+                    method: 'GET',
+                    headers: {
+                        'apikey': envKey,
+                        'Authorization': `Bearer ${envKey}`
+                    },
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                if (response.ok || response.status === 404) {
+                    // 404 is fine here, it means we reached the server and it replied "No route", but we connected!
+                    // 200 is better.
+                    addLog(`Network OK. Status: ${response.status}`);
+                } else {
+                    addLog(`Network Warning. Server replied: ${response.status} ${response.statusText}`);
+                }
+            } catch (netErr: any) {
+                console.error("Network check failed:", netErr);
+                addLog(`NETWORK ERROR: ${netErr.name} - ${netErr.message}`);
+                addLog('DIAGNOSIS: The browser cannot reach Supabase.');
+                addLog('Check: AdBlockers, Firewalls, or invalid URL.');
+                throw new Error('Network Reachability Failed');
+            }
+
+            // STEP 1: SDK PING (Simple Select)
+            addLog('Step 1: Pinging database (SDK)...');
             
             const { error: pingError } = await withTimeout(
                 supabase.from('connection_tests').select('id').limit(1)
@@ -123,7 +205,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 if (pingError.code === '42P01') {
                      throw new Error('Table "connection_tests" not found. Run the SQL Fix.');
                 }
-                throw new Error(`Ping Failed: ${pingError.message}`);
+                throw new Error(`Ping Failed: ${pingError.message} (${pingError.code || 'No Code'})`);
             }
             addLog(`Ping successful. Connection established.`);
 
@@ -166,19 +248,17 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             addLog('ERROR: ' + msg);
             
             // Heuristic diagnostics for Frontend/Vite based on user context
-            if (msg.includes('timed out') || msg.includes('Failed to fetch')) {
+            if (msg.includes('timed out') || msg.includes('Failed to fetch') || msg.includes('Network Reachability')) {
                 addLog('------------------------------------------------');
-                addLog('DIAGNOSIS: CONNECTION TIMEOUT');
-                addLog('1. Check VITE_SUPABASE_URL in Coolify.');
-                addLog('2. DB might be paused (7-day inactivity). Open Supabase Dashboard to wake it.');
-                addLog('3. Check "Network Restrictions" in Supabase settings.');
-                addLog('4. Disable AdBlockers/Privacy extensions (they often block supabase.co).');
+                addLog('DIAGNOSIS: CONNECTION TIMEOUT / BLOCKED');
+                addLog('1. Check VITE_SUPABASE_URL in Coolify (No quotes!).');
+                addLog('2. DB might be paused (7-day inactivity).');
+                addLog('3. Disable AdBlockers (uBlock, etc).');
                 addLog('------------------------------------------------');
             } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission')) {
                 addLog('------------------------------------------------');
                 addLog('DIAGNOSIS: RLS / PERMISSIONS');
                 addLog('The app connected, but was blocked from reading.');
-                addLog('You need a "SELECT" policy for "anon" role.');
                 addLog('Run the "Copy SQL Fix" script below.');
                 addLog('------------------------------------------------');
             }
@@ -191,11 +271,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         <Modal isOpen={isOpen} onClose={onClose} title="Connection Troubleshooter">
             <div className="space-y-6">
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-sm text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
-                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Docker / Coolify Checklist</h4>
+                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Security Warnings Detected</h4>
+                    <p className="text-xs mb-2">
+                        Your dashboard reported security issues regarding "Mutable Search Path" and "Overly Permissive RLS".
+                    </p>
                     <ul className="list-disc ml-4 space-y-1 text-xs">
-                        <li><strong>Env Vars:</strong> Must start with <code>VITE_</code> (e.g. <code>VITE_SUPABASE_URL</code>).</li>
-                        <li><strong>Host Binding:</strong> Vite must run with <code>--host</code> (Applied).</li>
-                        <li><strong>Cold Starts:</strong> Free databases pause after 7 days. First request takes 20s+.</li>
+                        <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
+                        <li><strong>RLS Policy:</strong> Tightened <code>connection_tests</code> policies to prevent unrestricted deletion.</li>
                     </ul>
                 </div>
 
@@ -254,8 +336,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                             disabled={!inputVal || status === 'writing' || status === 'reading'}
                             className="mt-3 w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
                         >
-                            {status === 'writing' || status === 'reading' ? <Activity className="animate-spin" size={18} /> : <Timer size={18} />}
-                            {status === 'writing' ? 'Waiting...' : 'Test Latency'}
+                            {status === 'writing' || status === 'reading' ? <Activity className="animate-spin" size={18} /> : <Globe size={18} />}
+                            {status === 'writing' ? 'Testing...' : 'Test Reachability'}
                         </button>
                     </div>
 
@@ -274,9 +356,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     <div className="flex items-start gap-3">
                         <Database className="text-slate-500 shrink-0 mt-1" size={20} />
                         <div>
-                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm">Create Test Table</h4>
+                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm">Apply Security Fixes</h4>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                If you get a "Relation not found" error, you need to create the table first.
+                                Run this SQL to fix "Mutable Search Path" and RLS policies.
                             </p>
                         </div>
                     </div>
@@ -295,7 +377,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                             className="flex-1 flex items-center justify-center gap-2 bg-mini-red hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
                         >
                             {copied ? <Check size={14} /> : <Copy size={14} />}
-                            {copied ? 'Copied!' : 'Copy SQL'}
+                            {copied ? 'Copied!' : 'Copy SQL Fixes'}
                         </button>
                     </div>
                 </div>

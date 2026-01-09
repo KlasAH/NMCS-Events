@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
@@ -133,8 +132,9 @@ const EventDetails: React.FC = () => {
   }, [id]);
 
   const groupedMaps = useMemo(() => {
-      if (!meeting?.maps_config) return {};
       const groups: Record<string, MapConfig[]> = {};
+      if (!meeting?.maps_config) return groups;
+      
       meeting.maps_config.forEach(map => {
           const name = map.groupName || 'General';
           if (!groups[name]) groups[name] = [];
@@ -346,7 +346,7 @@ const EventDetails: React.FC = () => {
                                                 className="overflow-hidden"
                                             >
                                                 <div className="p-4 space-y-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
-                                                    {maps.map((mapItem, idx) => (
+                                                    {(maps as MapConfig[]).map((mapItem, idx) => (
                                                         <div key={idx} className="flex flex-col items-center text-center">
                                                             <div className="bg-white p-2 rounded-lg border border-slate-100 dark:border-slate-700 mb-2 shadow-sm">
                                                                 <QRCode

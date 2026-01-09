@@ -102,9 +102,12 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('nmcs-assets', 'nmcs-assets', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
--- 9. ADMIN FUNCTION
+-- 9. ADMIN FUNCTION (SECURED)
 CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN 
+LANGUAGE plpgsql 
+SECURITY DEFINER SET search_path = public
+AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'board')
@@ -112,7 +115,7 @@ BEGIN
     SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role IN ('admin', 'board')
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- 10. POLICIES (Drop first to allow re-running script safely)
 
@@ -125,9 +128,13 @@ CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR 
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
--- Connection Tests (Critical for Handshake Tester)
+-- Connection Tests (Fixed: Split policies to avoid ALL permissiveness)
 DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
-CREATE POLICY "Public can test connection" ON public.connection_tests FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
+DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
+
+CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT USING (true);
 
 -- Meetings
 DROP POLICY IF EXISTS "Public meetings are viewable by everyone" ON public.meetings;
@@ -180,9 +187,12 @@ CREATE POLICY "Auth Upload" ON storage.objects FOR INSERT WITH CHECK ( bucket_id
 CREATE POLICY "Auth Update" ON storage.objects FOR UPDATE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Delete" ON storage.objects FOR DELETE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 
--- 11. TRIGGER: HANDLE NEW USER
+-- 11. TRIGGER: HANDLE NEW USER (SECURED)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+LANGUAGE plpgsql 
+SECURITY DEFINER SET search_path = public
+AS $$
 DECLARE
   extracted_username TEXT;
   extracted_fullname TEXT;
@@ -206,7 +216,7 @@ BEGIN
     
   RETURN new;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created

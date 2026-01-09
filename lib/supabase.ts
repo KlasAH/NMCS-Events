@@ -6,7 +6,13 @@ const getEnvVar = (key: string) => {
         // @ts-ignore
         if (typeof import.meta !== 'undefined' && import.meta.env) {
             // @ts-ignore
-            return import.meta.env[key] || '';
+            let value = import.meta.env[key] || '';
+            // CRITICAL FIX: Docker/Coolify sometimes injects quotes or whitespace.
+            // We must strip start/end quotes and trim whitespace.
+            if (typeof value === 'string') {
+                value = value.replace(/^['"]|['"]$/g, '').trim();
+            }
+            return value;
         }
     } catch (e) {
         console.warn('Error reading environment variables:', e);
