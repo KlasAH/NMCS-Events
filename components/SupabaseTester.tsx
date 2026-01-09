@@ -1,20 +1,13 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Trash2, Edit2, Save, X, RefreshCw, Plus } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, Info, ShieldAlert } from 'lucide-react';
 import Modal from './Modal';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 interface SupabaseTesterProps {
     isOpen: boolean;
     onClose: () => void;
-}
-
-interface TestRow {
-    id: string;
-    message: string;
-    response_data: string;
-    created_at: string;
 }
 
 const FIX_SQL = `
@@ -31,27 +24,19 @@ ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
 -- Ensure policy exists (Drop first to avoid conflicts)
 DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
 
--- Allow everyone (including anonymous users) to use this table for testing (ALL = Select, Insert, Update, Delete)
+-- Allow everyone (including anonymous users) to use this table for testing
 CREATE POLICY "Public can test connection" ON public.connection_tests 
 FOR ALL USING (true) WITH CHECK (true);
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
-    // Input States
-    const [msgInput, setMsgInput] = useState('');
-    const [tagInput, setTagInput] = useState(''); // Second field
-    
-    // Data States
-    const [rows, setRows] = useState<TestRow[]>([]);
-    const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+    const [inputVal, setInputVal] = useState('');
+    const [outputVal, setOutputVal] = useState<string | null>(null);
+    const [status, setStatus] = useState<'idle' | 'writing' | 'reading' | 'success' | 'error'>('idle');
     const [logs, setLogs] = useState<string[]>([]);
     const [copied, setCopied] = useState(false);
     
-    // Edit States
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [editMsg, setEditMsg] = useState('');
-    const [editTag, setEditTag] = useState('');
-
+    // Timer ref to show "Waking up" messages
     const coldStartTimer = useRef<any>(null);
 
     const addLog = (msg: string) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
@@ -62,7 +47,23 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const checkEnv = () => {
+    // Helper to timeout a promise
+    // Increased to 60000ms (60s) to handle Supabase "cold starts" on free tier
+    const withTimeout = (promise: any, ms: number = 60000) => {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error(`Connection timed out (${ms/1000}s).`)), ms))
+        ]);
+    };
+
+    const handleTest = async () => {
+        if (!inputVal) return;
+        
+        setStatus('writing');
+        setOutputVal(null);
+        setLogs([]);
+        
+        // Use standard Vite env access safely
         let envUrl = '';
         try {
             // @ts-ignore
@@ -70,290 +71,214 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                  // @ts-ignore
                  envUrl = import.meta.env.VITE_SUPABASE_URL || '';
             }
-        } catch (e) {}
+        } catch (e) {
+            // ignore
+        }
         
         if (!envUrl) {
-            addLog('CRITICAL: VITE_SUPABASE_URL is missing!');
+            addLog('CRITICAL ERROR: VITE_SUPABASE_URL is missing!');
+            addLog('In Coolify/Docker, env vars MUST start with "VITE_".');
             setStatus('error');
-            return false;
+            return;
         }
-        return true;
-    };
 
-    // --- CRUD OPERATIONS ---
-
-    const fetchRows = async () => {
-        if (!checkEnv()) return;
+        addLog(`Target: ${envUrl.replace(/https:\/\/[^.]+\./, 'https://***.')}`);
+        addLog('Initiating handshake...');
         
-        if (isDemoMode) {
-             setRows([
-                 { id: 'demo-1', message: 'Hello World', response_data: 'Demo Tag 1', created_at: new Date().toISOString() },
-                 { id: 'demo-2', message: 'Testing 123', response_data: 'Demo Tag 2', created_at: new Date().toISOString() }
-             ]);
-             return;
-        }
-
-        const { data, error } = await supabase
-            .from('connection_tests')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5);
-
-        if (error) {
-            addLog(`Fetch Error: ${error.message}`);
-            if (error.code === '42P01') setStatus('error'); // Table missing
-        } else {
-            setRows(data || []);
-            // addLog('Refreshed list.');
-        }
-    };
-
-    const handleCreate = async () => {
-        if (!msgInput || !checkEnv()) return;
-        setStatus('loading');
-        
-        // Cold start warning
         if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+        
+        // Show a helpful message if it takes longer than 3 seconds
         coldStartTimer.current = setTimeout(() => {
-             addLog('...database waking up (Free Tier). Please wait...');
+             addLog('...still connecting. Database might be waking up (Free Tier). This can take up to 20-30s.');
         }, 3000);
 
         if (isDemoMode) {
+            clearTimeout(coldStartTimer.current);
             setTimeout(() => {
-                addLog('Demo: Created row');
-                setRows([{id: Date.now().toString(), message: msgInput, response_data: tagInput || 'N/A', created_at: new Date().toISOString()}, ...rows]);
-                setStatus('success');
-                setMsgInput('');
-                setTagInput('');
-                clearTimeout(coldStartTimer.current);
-            }, 500);
+                addLog('Demo Mode: Simulating write...');
+                setStatus('reading');
+                setTimeout(() => {
+                    addLog('Demo Mode: Read successful.');
+                    setOutputVal(inputVal);
+                    setStatus('success');
+                }, 800);
+            }, 800);
             return;
         }
 
         try {
-            const { data, error } = await supabase.from('connection_tests').insert([{
-                message: msgInput,
-                response_data: tagInput || 'Auto-generated tag'
-            }]).select().single();
-
+            // STEP 1: PING (Simple Select)
+            // We use a lighter query to check connectivity first
+            addLog('Step 1: Pinging database...');
+            
+            const { error: pingError } = await withTimeout(
+                supabase.from('connection_tests').select('id').limit(1)
+            );
+            
+            // Clear the "waking up" timer as soon as we get a response
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
 
-            if (error) throw error;
+            if (pingError) {
+                // If the table doesn't exist, we'll get a specific error code 42P01
+                if (pingError.code === '42P01') {
+                     throw new Error('Table "connection_tests" not found. Run the SQL Fix.');
+                }
+                throw new Error(`Ping Failed: ${pingError.message}`);
+            }
+            addLog(`Ping successful. Connection established.`);
 
-            addLog(`Created ID: ${data.id.slice(0, 8)}...`);
-            setMsgInput('');
-            setTagInput('');
+            // STEP 2: WRITE
+            addLog(`Step 2: Writing "${inputVal}"...`);
+            const { data: insertData, error: insertError } = await withTimeout(
+                supabase.from('connection_tests')
+                .insert([{ 
+                    message: inputVal,
+                    response_data: 'Server received: ' + inputVal
+                }])
+                .select()
+                .single()
+            );
+
+            if (insertError) throw new Error(`Write Failed: ${insertError.message}`);
+
+            addLog('Write successful. Row ID: ' + insertData.id);
+            setStatus('reading');
+
+            // STEP 3: READ BACK
+            addLog('Step 3: Verifying data...');
+            const { data: readData, error: readError } = await withTimeout(
+                supabase.from('connection_tests')
+                .select('message')
+                .eq('id', insertData.id)
+                .single()
+            );
+
+            if (readError) throw new Error(`Read Failed: ${readError.message}`);
+
+            addLog(`Read successful. Value: "${readData.message}"`);
+            setOutputVal(readData.message);
             setStatus('success');
-            fetchRows();
+
         } catch (err: any) {
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-            addLog(`Create Failed: ${err.message}`);
+            console.error(err);
+            const msg = err.message || 'Unknown error';
+            addLog('ERROR: ' + msg);
+            
+            // Heuristic diagnostics for Frontend/Vite
+            if (msg.includes('timed out') || msg.includes('Failed to fetch')) {
+                addLog('------------------------------------------------');
+                addLog('TIMEOUT / CONNECTION DIAGNOSIS:');
+                addLog('1. Check VITE_SUPABASE_URL in Coolify Settings.');
+                addLog('2. Ensure Supabase project is ACTIVE (not paused).');
+                addLog('3. Check Browser Console for "Connection Refused".');
+                addLog('------------------------------------------------');
+            } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission')) {
+                addLog('------------------------------------------------');
+                addLog('RLS / PERMISSION DIAGNOSIS:');
+                addLog('The app cannot read data (Infinite Loading).');
+                addLog('You need a "SELECT" policy for "anon" role.');
+                addLog('Run the "Copy SQL Fix" script to test.');
+                addLog('------------------------------------------------');
+            }
+
             setStatus('error');
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if(isDemoMode) {
-            setRows(rows.filter(r => r.id !== id));
-            addLog('Demo: Deleted row');
-            return;
-        }
-
-        addLog(`Deleting ${id.slice(0,8)}...`);
-        const { error } = await supabase.from('connection_tests').delete().eq('id', id);
-        
-        if (error) {
-            addLog(`Delete Failed: ${error.message}`);
-        } else {
-            addLog('Deleted successfully.');
-            fetchRows();
-        }
-    };
-
-    const startEdit = (row: TestRow) => {
-        setEditingId(row.id);
-        setEditMsg(row.message);
-        setEditTag(row.response_data || '');
-    };
-
-    const handleUpdate = async (id: string) => {
-        if(isDemoMode) {
-            setRows(rows.map(r => r.id === id ? {...r, message: editMsg, response_data: editTag} : r));
-            setEditingId(null);
-            addLog('Demo: Updated row');
-            return;
-        }
-
-        const { error } = await supabase
-            .from('connection_tests')
-            .update({ message: editMsg, response_data: editTag })
-            .eq('id', id);
-
-        if (error) {
-            addLog(`Update Failed: ${error.message}`);
-        } else {
-            addLog(`Updated ${id.slice(0,8)}`);
-            setEditingId(null);
-            fetchRows();
-        }
-    };
-
-    // Initial Load
-    useEffect(() => {
-        if (isOpen) {
-            fetchRows();
-        }
-    }, [isOpen]);
-
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Database Handshake & CRUD Tester">
+        <Modal isOpen={isOpen} onClose={onClose} title="Database Handshake Tester">
             <div className="space-y-6">
-                
-                {/* Intro */}
-                <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl text-sm text-slate-600 dark:text-slate-300 flex items-start gap-3">
-                    <Database className="shrink-0 text-mini-red mt-1" size={20} />
-                    <div>
-                        <p>Test full <strong>Create, Read, Update, Delete</strong> permissions.</p>
-                        <p className="mt-1 text-xs opacity-70">If rows don't appear, run the SQL Fix below to ensure the policy allows 'ALL' operations.</p>
+                <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl text-sm text-slate-600 dark:text-slate-300">
+                    <p>Verify <strong>Read</strong> and <strong>Write</strong> permissions to the remote Supabase database.</p>
+                    <p className="mt-2 text-xs text-slate-400">Note: On Supabase Free Tier, the first request after inactivity may take 10-20 seconds.</p>
+                </div>
+
+                {/* VISUALIZER */}
+                <div className="flex items-center justify-between px-4 py-8 bg-slate-100 dark:bg-slate-900 rounded-2xl relative overflow-hidden">
+                    {/* PC */}
+                    <div className="flex flex-col items-center z-10">
+                        <div className={`p-4 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border-2 ${status === 'writing' ? 'border-mini-red' : 'border-transparent'}`}>
+                             <Server size={24} className="text-slate-700 dark:text-slate-200" />
+                        </div>
+                        <span className="text-xs font-bold mt-2 text-slate-500">Your App</span>
+                    </div>
+
+                    {/* Connection Line */}
+                    <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 px-16">
+                        <div className="h-1 bg-slate-200 dark:bg-slate-700 w-full rounded-full overflow-hidden relative">
+                             <div className="absolute inset-0 bg-slate-200 dark:bg-slate-700"></div>
+                             {status === 'success' && <div className="absolute inset-0 bg-green-500"></div>}
+                             {status === 'error' && <div className="absolute inset-0 bg-red-500"></div>}
+                            {(status === 'writing' || status === 'reading') && (
+                                <motion.div 
+                                    className="h-full bg-mini-red w-1/3 absolute top-0"
+                                    initial={{ x: '-100%' }}
+                                    animate={{ x: '300%' }}
+                                    transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                                />
+                            )}
+                        </div>
+                    </div>
+
+                    {/* DB */}
+                    <div className="flex flex-col items-center z-10">
+                         <div className={`p-4 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border-2 ${status === 'reading' || status === 'success' ? 'border-green-500' : status === 'error' ? 'border-red-500' : 'border-transparent'}`}>
+                             {status === 'error' ? (
+                                <AlertCircle size={24} className="text-red-500" />
+                             ) : (
+                                <Database size={24} className="text-slate-700 dark:text-slate-200" />
+                             )}
+                        </div>
+                        <span className="text-xs font-bold mt-2 text-slate-500">Supabase</span>
                     </div>
                 </div>
 
-                {/* 1. CREATE SECTION */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Add New Record</label>
-                            {status === 'loading' && <Activity className="animate-spin text-mini-red" size={14} />}
-                        </div>
-                        
-                        <div className="space-y-2">
-                            <input 
-                                type="text" 
-                                value={msgInput}
-                                onChange={(e) => setMsgInput(e.target.value)}
-                                placeholder="Field 1: Message (e.g. Hello)"
-                                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-mini-red outline-none text-sm"
-                            />
-                            <input 
-                                type="text" 
-                                value={tagInput}
-                                onChange={(e) => setTagInput(e.target.value)}
-                                placeholder="Field 2: Tag (e.g. Test A)"
-                                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-mini-red outline-none text-sm"
-                            />
-                        </div>
-
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Write Value</label>
+                        <input 
+                            type="text" 
+                            value={inputVal}
+                            onChange={(e) => setInputVal(e.target.value)}
+                            placeholder="Type a test message..."
+                            className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-mini-red outline-none"
+                        />
                         <button 
-                            onClick={handleCreate}
-                            disabled={!msgInput || status === 'loading'}
-                            className="w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+                            onClick={handleTest}
+                            disabled={!inputVal || status === 'writing' || status === 'reading'}
+                            className="mt-3 w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
                         >
-                            <Plus size={18} />
-                            {status === 'loading' ? 'Saving...' : 'Add Record'}
+                            {status === 'writing' || status === 'reading' ? <Activity className="animate-spin" size={18} /> : <Server size={18} />}
+                            {status === 'writing' ? 'Sending...' : 'Send & Verify'}
                         </button>
                     </div>
 
-                    {/* LOGS */}
-                    <div className="flex flex-col h-full min-h-[160px]">
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Activity Log</label>
-                        <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse h-full max-h-[200px]">
-                            {logs.length === 0 ? <span className="opacity-50">Waiting for action...</span> : logs.map((log, i) => (
+                    <div className="flex flex-col h-full">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status Log</label>
+                        <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse min-h-[140px]">
+                            {logs.length === 0 ? <span className="opacity-50">Ready to test...</span> : logs.map((log, i) => (
                                 <div key={i} className="mb-1 border-b border-white/10 pb-1 last:border-0 break-all">{log}</div>
                             ))}
                         </div>
                     </div>
                 </div>
 
-                {/* 2. READ/UPDATE/DELETE SECTION */}
-                <div>
-                    <div className="flex items-center justify-between mb-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Live Database Records (Last 5)</label>
-                        <button onClick={fetchRows} className="text-mini-red hover:bg-slate-100 dark:hover:bg-slate-800 p-1 rounded transition-colors" title="Refresh">
-                            <RefreshCw size={16} />
-                        </button>
-                    </div>
-
-                    <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-                        {rows.length === 0 ? (
-                            <div className="p-8 text-center text-slate-400 text-sm bg-slate-50 dark:bg-slate-800/50">
-                                {status === 'error' ? 'Connection Error or Table Missing.' : 'No records found. Add one above.'}
-                            </div>
-                        ) : (
-                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {rows.map((row) => (
-                                    <motion.div 
-                                        layout
-                                        key={row.id} 
-                                        className="p-3 bg-white dark:bg-slate-900 flex items-center gap-3"
-                                    >
-                                        {editingId === row.id ? (
-                                            /* EDIT MODE */
-                                            <div className="flex-grow grid grid-cols-2 gap-2">
-                                                <input 
-                                                    value={editMsg} 
-                                                    onChange={(e) => setEditMsg(e.target.value)}
-                                                    className="p-2 text-sm border rounded bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 outline-none focus:border-mini-red"
-                                                />
-                                                <input 
-                                                    value={editTag} 
-                                                    onChange={(e) => setEditTag(e.target.value)}
-                                                    className="p-2 text-sm border rounded bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 outline-none focus:border-mini-red"
-                                                />
-                                            </div>
-                                        ) : (
-                                            /* VIEW MODE */
-                                            <div className="flex-grow grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <span className="text-[10px] uppercase text-slate-400 font-bold block">Message</span>
-                                                    <span className="text-sm font-medium text-slate-800 dark:text-slate-200">{row.message}</span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-[10px] uppercase text-slate-400 font-bold block">Tag</span>
-                                                    <span className="text-sm text-slate-600 dark:text-slate-400">{row.response_data}</span>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <div className="flex items-center gap-1">
-                                            {editingId === row.id ? (
-                                                <>
-                                                    <button onClick={() => handleUpdate(row.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg">
-                                                        <Save size={16} />
-                                                    </button>
-                                                    <button onClick={() => setEditingId(null)} className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg">
-                                                        <X size={16} />
-                                                    </button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <button onClick={() => startEdit(row)} className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg">
-                                                        <Edit2 size={16} />
-                                                    </button>
-                                                    <button onClick={() => handleDelete(row.id)} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
-                                    </motion.div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* SQL Helper */}
+                {/* SQL Fix Section - Only shows on error or always for convenience */}
                 {status === 'error' && (
-                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl p-4 flex flex-col gap-4">
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl p-4 flex flex-col gap-4 animate-pulse">
                         <div className="flex items-start gap-3">
                             <AlertCircle className="text-red-500 shrink-0 mt-1" size={24} />
                             <div>
-                                <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Permissions Error</h4>
+                                <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Connection Failed</h4>
                                 <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                                    The app cannot Read/Write. Run this SQL to enable access for testing.
+                                    <strong>Coolify/Docker User?</strong> Ensure your Env Vars start with <code>VITE_</code>.
+                                    <br/>
+                                    <strong>Infinite Loading?</strong> You might need a "SELECT" Policy for "anon" users (RLS).
                                 </p>
                             </div>
                         </div>
+                        
                         <div className="flex gap-2">
                              <a 
                                 href="https://supabase.com/dashboard" 
@@ -379,6 +304,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                      <div>
                          <strong>Coolify Deployment Tip</strong><br/>
                          In Coolify "Environment Variables", keys MUST be <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_KEY</code>.
+                         <br/>
+                         If you use just <code>SUPABASE_URL</code>, the app will ignore them and fail silently.
                      </div>
                 </div>
             </div>
