@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer, Globe, Trash2, Edit2, Save, X, RefreshCw, Key, Play } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
@@ -260,28 +261,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     addLog(`Network OK. Status: ${response.status}`);
                 } else if (response.status === 401) {
                     addLog('CRITICAL ERROR: 401 Unauthorized.');
-                    
-                    // --- KEY DEBUGGER ---
-                    addLog('--- KEY INSPECTOR ---');
-                    if (!envKey) {
-                        addLog('❌ Key is empty/undefined.');
-                    } else {
-                        const safePreview = envKey.length > 15 
-                            ? `${envKey.slice(0, 10)}...${envKey.slice(-5)}` 
-                            : 'Too short to display';
-                        addLog(`🔑 Used Key: ${safePreview}`);
-                        
-                        if (envKey.startsWith('sb_')) {
-                            addLog('⛔ CRITICAL: RUNNING OLD KEY (Storyblok)');
-                            addLog('   REDEPLOY REQUIRED.');
-                        } else if (envKey.startsWith('eyJhb')) {
-                            addLog('✅ Prefix "eyJhb" detected.');
-                            addLog('   Key is correct format, but server rejected it.');
-                            addLog('   Check if Project ID in URL matches the Key.');
-                        }
-                    }
-                    addLog('-----------------------');
-
                     setStatus('error');
                     if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
                     return; // ABORT
@@ -293,6 +272,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 addLog(`NETWORK ERROR: ${netErr.name} - ${netErr.message}`);
                 throw new Error('Network Reachability Failed');
             }
+
+            // RESET TIMER: Step 0 Passed, so network is fine.
+            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+            coldStartTimer.current = setTimeout(() => {
+                 addLog('⚠️ Slow response detected on DB step.');
+                 startCountdown();
+            }, 3000);
 
             // STEP 1: DIRECT TABLE CHECK (REST)
             // Bypasses SDK to isolate if table exists or permissions issue
@@ -327,9 +313,21 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             // STEP 2: SDK PING
             addLog('Step 2: Pinging database (SDK)...');
             
-            // We use the SDK now
+            // RESET TIMER: Step 1 Passed, so REST is fine.
+            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+            coldStartTimer.current = setTimeout(() => {
+                 addLog('⚠️ SDK is taking a long time...');
+                 startCountdown();
+            }, 5000);
+
+            // CRITICAL: Create a fresh, isolated client using the keys we just verified.
+            // This ensures we are not using any global config/timeouts that might be broken.
+            const testClient = createClient(envUrl, envKey, {
+                auth: { persistSession: false } // Pure data test, no auth overhead
+            });
+            
             const { error: pingError } = await withTimeout(
-                supabase.from('connection_tests').select('id').limit(1)
+                testClient.from('connection_tests').select('id').limit(1)
             );
             
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
@@ -346,7 +344,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             // STEP 3: WRITE
             addLog(`Step 3: Writing "${inputVal}"...`);
             const { data: insertData, error: insertError } = await withTimeout(
-                supabase.from('connection_tests')
+                testClient.from('connection_tests')
                 .insert([{ 
                     message: inputVal,
                     response_data: 'Server received: ' + inputVal
@@ -363,7 +361,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             // STEP 4: READ BACK
             addLog('Step 4: Verifying data...');
             const { data: readData, error: readError } = await withTimeout(
-                supabase.from('connection_tests')
+                testClient.from('connection_tests')
                 .select('message')
                 .eq('id', insertData.id)
                 .single()
@@ -518,7 +516,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
                     <div className="flex flex-col h-full">
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Live Logs</label>
-                        <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse min-h-[140px]">
+                        <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse min-h-[160px]">
                             {logs.length === 0 ? <span className="opacity-50">Ready to test...</span> : logs.map((log, i) => (
                                 <div key={i} className="mb-1 border-b border-white/10 pb-1 last:border-0 break-all">{log}</div>
                             ))}

@@ -23,8 +23,13 @@ const getEnvVar = (key: string) => {
 // CRITICAL FOR COOLIFY/DOCKER:
 // Vite ignores variables that do not start with VITE_.
 // We must explicitly look for VITE_SUPABASE_URL.
-const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+let supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
 const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('VITE_SUPABASE_KEY');
+
+// SAFETY: Remove trailing slash if user added it in Coolify
+if (supabaseUrl && supabaseUrl.endsWith('/')) {
+    supabaseUrl = supabaseUrl.slice(0, -1);
+}
 
 // Debugging for Coolify/Docker deployments
 const isMissingKeys = !supabaseUrl || !supabaseAnonKey;
