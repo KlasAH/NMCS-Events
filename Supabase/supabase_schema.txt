@@ -6,7 +6,6 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Explicitly drop old policies that depend on is_board() BEFORE dropping the function
 DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations;
 DROP POLICY IF EXISTS "Board sees finances" ON public.transactions;
-DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations; 
 
 -- Now it is safe to drop the function
 DROP FUNCTION IF EXISTS public.is_board() CASCADE;

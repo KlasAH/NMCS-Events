@@ -14,7 +14,6 @@ const FIX_SQL = `
 -- Explicitly drop old policies that depend on is_board() BEFORE dropping the function
 DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations;
 DROP POLICY IF EXISTS "Board sees finances" ON public.transactions;
-DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations; 
 
 -- Now it is safe to drop the function
 DROP FUNCTION IF EXISTS public.is_board() CASCADE;
@@ -247,19 +246,23 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         addLog(`📏 Length: ${envKey.length} chars`);
                         
                         if (envKey.startsWith('sb_')) {
-                            addLog('⛔ CRITICAL: This looks like a Storyblok key ("sb_...").');
-                            addLog('   You have pasted the wrong key in Coolify!');
-                            addLog('   Get the "anon" key from Supabase Dashboard.');
+                            addLog('⛔ CRITICAL: WRONG SERVICE KEY');
+                            addLog('   You entered a STORYBLOK key ("sb_...").');
+                            addLog('   This app requires a SUPABASE key.');
+                            addLog('   ');
+                            addLog('   CORRECT PATH IN SUPABASE DASHBOARD:');
+                            addLog('   1. Click "Data API" (left menu).');
+                            addLog('   2. Look for "Project API keys".');
+                            addLog('   3. Copy the "anon" / "public" key.');
+                            addLog('   4. It MUST start with "ey...".');
                         } else if (!envKey.startsWith('ey')) {
-                            addLog('⚠️ WARNING: Key does not start with "ey". It should be a JWT.');
+                            addLog('⚠️ WARNING: Key does not start with "ey".');
+                            addLog('   Supabase keys are JWTs and usually start with "ey".');
                         } else {
                             addLog('✅ Format: Looks like a valid JWT (starts with ey).');
                         }
                     }
                     addLog('-----------------------');
-                    addLog('SOLUTIONS:');
-                    addLog('1. Replace VITE_SUPABASE_ANON_KEY in Coolify with correct key.');
-                    addLog('2. Rebuild the app (Environment variables are baked in).');
 
                     setStatus('error');
                     if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
@@ -347,7 +350,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             } else if (msg.includes('401')) {
                 addLog('------------------------------------------------');
                 addLog('DIAGNOSIS: INVALID API KEY');
-                addLog('Your Anon Key is incorrect or expired.');
+                addLog('See KEY INSPECTOR above.');
+                addLog('You likely need to Redeploy to apply new keys.');
                 addLog('------------------------------------------------');
             }
 
