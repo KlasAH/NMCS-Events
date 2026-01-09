@@ -1,7 +1,6 @@
-
 import React, { useState, useRef } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, Info, ShieldAlert } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
 
@@ -48,8 +47,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     };
 
     // Helper to timeout a promise
-    // Increased to 60000ms (60s) to handle Supabase "cold starts" on free tier
-    const withTimeout = (promise: any, ms: number = 60000) => {
+    // INCREASED to 65s for Supabase Free Tier Cold Starts (Slightly longer than fetch timeout to catch inner errors)
+    const withTimeout = (promise: any, ms: number = 65000) => {
         return Promise.race([
             promise,
             new Promise((_, reject) => setTimeout(() => reject(new Error(`Connection timed out (${ms/1000}s).`)), ms))
@@ -77,19 +76,21 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         
         if (!envUrl) {
             addLog('CRITICAL ERROR: VITE_SUPABASE_URL is missing!');
-            addLog('In Coolify/Docker, env vars MUST start with "VITE_".');
+            addLog('In Coolify, keys must start with "VITE_" to be visible to the frontend.');
             setStatus('error');
             return;
         }
 
         addLog(`Target: ${envUrl.replace(/https:\/\/[^.]+\./, 'https://***.')}`);
-        addLog('Initiating handshake...');
+        addLog('Initiating handshake (Timeout set to 60s)...');
         
         if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
         
         // Show a helpful message if it takes longer than 3 seconds
         coldStartTimer.current = setTimeout(() => {
-             addLog('...still connecting. Database might be waking up (Free Tier). This can take up to 20-30s.');
+             addLog('⚠️ Slow response detected.');
+             addLog('Database might be "Paused" (Free Tier limit).');
+             addLog('Waiting up to 60s for wake-up...');
         }, 3000);
 
         if (isDemoMode) {
@@ -108,7 +109,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
         try {
             // STEP 1: PING (Simple Select)
-            // We use a lighter query to check connectivity first
             addLog('Step 1: Pinging database...');
             
             const { error: pingError } = await withTimeout(
@@ -165,20 +165,21 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             const msg = err.message || 'Unknown error';
             addLog('ERROR: ' + msg);
             
-            // Heuristic diagnostics for Frontend/Vite
+            // Heuristic diagnostics for Frontend/Vite based on user context
             if (msg.includes('timed out') || msg.includes('Failed to fetch')) {
                 addLog('------------------------------------------------');
-                addLog('TIMEOUT / CONNECTION DIAGNOSIS:');
-                addLog('1. Check VITE_SUPABASE_URL in Coolify Settings.');
-                addLog('2. Ensure Supabase project is ACTIVE (not paused).');
-                addLog('3. Check Browser Console for "Connection Refused".');
+                addLog('DIAGNOSIS: CONNECTION TIMEOUT');
+                addLog('1. Check VITE_SUPABASE_URL in Coolify.');
+                addLog('2. DB might be paused (7-day inactivity). Open Supabase Dashboard to wake it.');
+                addLog('3. Check "Network Restrictions" in Supabase settings.');
+                addLog('4. Disable AdBlockers/Privacy extensions (they often block supabase.co).');
                 addLog('------------------------------------------------');
             } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission')) {
                 addLog('------------------------------------------------');
-                addLog('RLS / PERMISSION DIAGNOSIS:');
-                addLog('The app cannot read data (Infinite Loading).');
+                addLog('DIAGNOSIS: RLS / PERMISSIONS');
+                addLog('The app connected, but was blocked from reading.');
                 addLog('You need a "SELECT" policy for "anon" role.');
-                addLog('Run the "Copy SQL Fix" script to test.');
+                addLog('Run the "Copy SQL Fix" script below.');
                 addLog('------------------------------------------------');
             }
 
@@ -187,11 +188,15 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Database Handshake Tester">
+        <Modal isOpen={isOpen} onClose={onClose} title="Connection Troubleshooter">
             <div className="space-y-6">
-                <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl text-sm text-slate-600 dark:text-slate-300">
-                    <p>Verify <strong>Read</strong> and <strong>Write</strong> permissions to the remote Supabase database.</p>
-                    <p className="mt-2 text-xs text-slate-400">Note: On Supabase Free Tier, the first request after inactivity may take 10-20 seconds.</p>
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-sm text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
+                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Docker / Coolify Checklist</h4>
+                    <ul className="list-disc ml-4 space-y-1 text-xs">
+                        <li><strong>Env Vars:</strong> Must start with <code>VITE_</code> (e.g. <code>VITE_SUPABASE_URL</code>).</li>
+                        <li><strong>Host Binding:</strong> Vite must run with <code>--host</code> (Applied).</li>
+                        <li><strong>Cold Starts:</strong> Free databases pause after 7 days. First request takes 20s+.</li>
+                    </ul>
                 </div>
 
                 {/* VISUALIZER */}
@@ -236,12 +241,12 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Write Value</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Test Connection</label>
                         <input 
                             type="text" 
                             value={inputVal}
                             onChange={(e) => setInputVal(e.target.value)}
-                            placeholder="Type a test message..."
+                            placeholder="Type hello..."
                             className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-mini-red outline-none"
                         />
                         <button 
@@ -249,13 +254,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                             disabled={!inputVal || status === 'writing' || status === 'reading'}
                             className="mt-3 w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
                         >
-                            {status === 'writing' || status === 'reading' ? <Activity className="animate-spin" size={18} /> : <Server size={18} />}
-                            {status === 'writing' ? 'Sending...' : 'Send & Verify'}
+                            {status === 'writing' || status === 'reading' ? <Activity className="animate-spin" size={18} /> : <Timer size={18} />}
+                            {status === 'writing' ? 'Waiting...' : 'Test Latency'}
                         </button>
                     </div>
 
                     <div className="flex flex-col h-full">
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status Log</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Live Logs</label>
                         <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse min-h-[140px]">
                             {logs.length === 0 ? <span className="opacity-50">Ready to test...</span> : logs.map((log, i) => (
                                 <div key={i} className="mb-1 border-b border-white/10 pb-1 last:border-0 break-all">{log}</div>
@@ -264,49 +269,35 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     </div>
                 </div>
 
-                {/* SQL Fix Section - Only shows on error or always for convenience */}
-                {status === 'error' && (
-                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl p-4 flex flex-col gap-4 animate-pulse">
-                        <div className="flex items-start gap-3">
-                            <AlertCircle className="text-red-500 shrink-0 mt-1" size={24} />
-                            <div>
-                                <h4 className="font-bold text-red-700 dark:text-red-300 text-sm">Connection Failed</h4>
-                                <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                                    <strong>Coolify/Docker User?</strong> Ensure your Env Vars start with <code>VITE_</code>.
-                                    <br/>
-                                    <strong>Infinite Loading?</strong> You might need a "SELECT" Policy for "anon" users (RLS).
-                                </p>
-                            </div>
-                        </div>
-                        
-                        <div className="flex gap-2">
-                             <a 
-                                href="https://supabase.com/dashboard" 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="flex-1 flex items-center justify-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg font-bold text-xs hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                             >
-                                <ExternalLink size={14} /> Open Dashboard
-                             </a>
-                            <button 
-                                onClick={copySql}
-                                className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
-                            >
-                                {copied ? <Check size={14} /> : <Copy size={14} />}
-                                {copied ? 'Copied!' : 'Copy SQL Fix'}
-                            </button>
+                {/* SQL Fix Section */}
+                <div className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl p-4 flex flex-col gap-3">
+                    <div className="flex items-start gap-3">
+                        <Database className="text-slate-500 shrink-0 mt-1" size={20} />
+                        <div>
+                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm">Create Test Table</h4>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                If you get a "Relation not found" error, you need to create the table first.
+                            </p>
                         </div>
                     </div>
-                )}
-                
-                <div className="bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-xl text-xs text-yellow-800 dark:text-yellow-300 border border-yellow-100 dark:border-yellow-900/30 flex items-start gap-3">
-                     <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-                     <div>
-                         <strong>Coolify Deployment Tip</strong><br/>
-                         In Coolify "Environment Variables", keys MUST be <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_KEY</code>.
-                         <br/>
-                         If you use just <code>SUPABASE_URL</code>, the app will ignore them and fail silently.
-                     </div>
+                    
+                    <div className="flex gap-2">
+                         <a 
+                            href="https://supabase.com/dashboard" 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="flex-1 flex items-center justify-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg font-bold text-xs hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                         >
+                            <ExternalLink size={14} /> Open Dashboard
+                         </a>
+                        <button 
+                            onClick={copySql}
+                            className="flex-1 flex items-center justify-center gap-2 bg-mini-red hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
+                        >
+                            {copied ? <Check size={14} /> : <Copy size={14} />}
+                            {copied ? 'Copied!' : 'Copy SQL'}
+                        </button>
+                    </div>
                 </div>
             </div>
         </Modal>

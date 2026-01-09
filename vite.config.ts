@@ -9,7 +9,11 @@ const __dirname = path.dirname(__filename);
 export default defineConfig({
     server: {
       port: 3000,
-      host: '0.0.0.0',
+      host: '0.0.0.0', // Critical for Docker/Coolify networking
+    },
+    preview: {
+      port: 3000,
+      host: '0.0.0.0', // Critical for Production Preview
     },
     plugins: [react()],
     resolve: {

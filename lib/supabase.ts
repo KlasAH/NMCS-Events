@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 
 // Access environment variables safely for Vite
@@ -15,28 +14,64 @@ const getEnvVar = (key: string) => {
     return '';
 };
 
+// CRITICAL FOR COOLIFY/DOCKER:
+// Vite ignores variables that do not start with VITE_.
+// We must explicitly look for VITE_SUPABASE_URL.
 const supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
 const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('VITE_SUPABASE_KEY');
 
 // Debugging for Coolify/Docker deployments
-if (!supabaseUrl || !supabaseAnonKey) {
+const isMissingKeys = !supabaseUrl || !supabaseAnonKey;
+
+if (isMissingKeys) {
     console.warn(
         '%c[NMCS Warning] Supabase keys are missing!', 
-        'color: orange; font-weight: bold; font-size: 12px;'
+        'color: orange; font-weight: bold; font-size: 14px; background: #333; padding: 4px;'
     );
     console.warn(
-        'If you are running in Coolify/Docker, ensure your Environment Variables start with "VITE_".\n' +
-        'Example: SUPABASE_URL -> VITE_SUPABASE_URL'
+        'TROUBLESHOOTING FOR COOLIFY/DOCKER:\n' +
+        '1. "Invisible Variable Bug": Vite ignores env vars unless they start with "VITE_".\n' +
+        '   - Rename SUPABASE_URL -> VITE_SUPABASE_URL\n' +
+        '   - Rename SUPABASE_KEY -> VITE_SUPABASE_ANON_KEY\n' +
+        '2. "Build Time Injection": In Docker, you might need to redeploy after setting vars.\n'
     );
 }
 
 // Fallback for Demo Mode if keys are missing
-export const isDemoMode = !supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder');
+// We detect "placeholder" which is sometimes set by default in templates
+export const isDemoMode = isMissingKeys || supabaseUrl.includes('placeholder');
 
 const finalUrl = isDemoMode ? 'https://placeholder.supabase.co' : supabaseUrl;
 const finalKey = isDemoMode ? 'placeholder' : supabaseAnonKey;
 
-export const supabase = createClient(finalUrl, finalKey);
+// Create client with specific configuration for connection stability
+export const supabase = createClient(finalUrl, finalKey, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+    },
+    // Retry configuration for flaky connections (Cold Starts)
+    global: {
+        fetch: (url, options) => {
+            // Use AbortController for broader compatibility than AbortSignal.timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
+            return fetch(url, {
+                ...options,
+                signal: controller.signal
+            }).then(response => {
+                clearTimeout(timeoutId);
+                return response;
+            }).catch(err => {
+                clearTimeout(timeoutId);
+                console.error("Supabase Fetch Error:", err);
+                throw err;
+            });
+        }
+    }
+});
 
 // Storage Bucket Configuration
 export const STORAGE_BUCKET = 'nmcs-assets';
