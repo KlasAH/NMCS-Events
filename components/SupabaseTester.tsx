@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer, Globe, Trash2, Edit2, Save, X, RefreshCw, Key } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer, Globe, Trash2, Edit2, Save, X, RefreshCw, Key, Play } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
 
@@ -101,7 +101,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editValue, setEditValue] = useState('');
     
-    // Timer ref to show "Waking up" messages
+    // Countdown state for cold starts
+    const [countdown, setCountdown] = useState<number | null>(null);
     const coldStartTimer = useRef<any>(null);
 
     const addLog = (msg: string) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
@@ -136,9 +137,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             .limit(5);
         
         if (error) {
-            // Don't log basic empty table errors, only connectivity/auth errors
             if (error.code !== 'PGRST116') {
-                 addLog(`Fetch Error: ${error.message}`);
+                 // console.error(error); 
             }
         } else {
             setTableRows(data || []);
@@ -151,12 +151,34 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         }
     }, [isOpen]);
 
+    // Cleanup timer on unmount
+    useEffect(() => {
+        return () => {
+            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+        };
+    }, []);
+
+    const startCountdown = () => {
+        setCountdown(60);
+        const interval = setInterval(() => {
+            setCountdown(prev => {
+                if (prev === null || prev <= 1) {
+                    clearInterval(interval);
+                    return null;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        return interval;
+    };
+
     const handleTest = async () => {
         if (!inputVal) return;
         
         setStatus('writing');
         setOutputVal(null);
         setLogs([]);
+        setCountdown(null);
         
         // Use standard Vite env access safely
         let envUrl = '';
@@ -166,6 +188,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             if (typeof import.meta !== 'undefined' && import.meta.env) {
                  // @ts-ignore
                  envUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/^['"]|['"]$/g, '').trim();
+                 // Remove trailing slash if present
+                 envUrl = envUrl.replace(/\/$/, '');
+                 
                  // @ts-ignore
                  envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').replace(/^['"]|['"]$/g, '').trim();
             }
@@ -189,10 +214,12 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         
         if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
         
+        // Start "Slow Response" detector
         coldStartTimer.current = setTimeout(() => {
              addLog('⚠️ Slow response detected.');
              addLog('Database might be "Paused" (Free Tier limit).');
-             addLog('Waiting up to 60s for wake-up...');
+             addLog('Waking up database... (up to 60s)');
+             startCountdown();
         }, 3000);
 
         if (isDemoMode) {
@@ -211,12 +238,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         }
 
         try {
-            // STEP 0: DIRECT HTTP CHECK
+            // STEP 0: DIRECT HTTP CHECK (Root)
             addLog('Step 0: Network Reachability Check...');
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
             try {
                 const restUrl = `${envUrl}/rest/v1/`;
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
                 
                 const response = await fetch(restUrl, {
                     method: 'GET',
@@ -238,59 +266,74 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     if (!envKey) {
                         addLog('❌ Key is empty/undefined.');
                     } else {
-                        // Show first 10 and last 5 chars to help user debug
                         const safePreview = envKey.length > 15 
                             ? `${envKey.slice(0, 10)}...${envKey.slice(-5)}` 
                             : 'Too short to display';
                         addLog(`🔑 Used Key: ${safePreview}`);
                         
                         if (envKey.startsWith('sb_')) {
-                            addLog('⛔ CRITICAL: RUNNING OLD KEY');
-                            addLog('   Current App Key: ' + safePreview);
-                            addLog('   ');
-                            addLog('   DID YOU UPDATE COOLIFY?');
-                            addLog('   If you already updated the key in Coolify to "ey...",');
-                            addLog('   then this app is running an OLD BUILD.');
-                            addLog('   ');
-                            addLog('   SOLUTION:');
-                            addLog('   1. Go to Coolify.');
-                            addLog('   2. Click "Redeploy" (Ensure "Build" is checked).');
-                            addLog('   3. Refresh this page after deployment finishes.');
+                            addLog('⛔ CRITICAL: RUNNING OLD KEY (Storyblok)');
+                            addLog('   REDEPLOY REQUIRED.');
                         } else if (envKey.startsWith('eyJhb')) {
-                            addLog('✅ Prefix "eyJhb" detected (Standard Supabase).');
-                            addLog('   Key format is correct, but server rejected it.');
-                            addLog('   Check if the project is "Paused" in Supabase.');
-                        } else if (!envKey.startsWith('ey')) {
-                            addLog('⚠️ WARNING: Key does not start with "ey".');
-                            addLog('   Supabase keys are JWTs and usually start with "ey".');
-                        } else {
-                            addLog('✅ Format: Looks like a valid JWT (starts with ey).');
+                            addLog('✅ Prefix "eyJhb" detected.');
+                            addLog('   Key is correct format, but server rejected it.');
+                            addLog('   Check if Project ID in URL matches the Key.');
                         }
                     }
                     addLog('-----------------------');
 
                     setStatus('error');
                     if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-                    return; // ABORT - No need to try SDK
+                    return; // ABORT
                 } else {
                     addLog(`Network Warning. Server replied: ${response.status} ${response.statusText}`);
                 }
             } catch (netErr: any) {
                 console.error("Network check failed:", netErr);
                 addLog(`NETWORK ERROR: ${netErr.name} - ${netErr.message}`);
-                addLog('DIAGNOSIS: The browser cannot reach Supabase.');
-                addLog('Check: AdBlockers, Firewalls, or invalid URL.');
                 throw new Error('Network Reachability Failed');
             }
 
-            // STEP 1: SDK PING
-            addLog('Step 1: Pinging database (SDK)...');
+            // STEP 1: DIRECT TABLE CHECK (REST)
+            // Bypasses SDK to isolate if table exists or permissions issue
+            addLog('Step 1: Checking Table Existence (REST)...');
+            try {
+                // Try to fetch just 1 row, 0 bytes
+                const tableUrl = `${envUrl}/rest/v1/connection_tests?select=id&limit=1`;
+                const tableResp = await fetch(tableUrl, {
+                    method: 'GET',
+                    headers: {
+                        'apikey': envKey,
+                        'Authorization': `Bearer ${envKey}`
+                    }
+                    // No timeout here, let it run (Supabase sleep can take time)
+                });
+                
+                if (tableResp.status === 404) {
+                    throw new Error('Table "connection_tests" Not Found (404). Run SQL Fix!');
+                } else if (tableResp.status === 401) {
+                     throw new Error('Unauthorized Access to Table. Check RLS Policies (Run SQL Fix).');
+                } else if (!tableResp.ok) {
+                     addLog(`Table Check Warning: ${tableResp.status} ${tableResp.statusText}`);
+                } else {
+                    addLog('Table "connection_tests" found and accessible.');
+                }
+            } catch (tableErr: any) {
+                 if (tableErr.message.includes('SQL Fix')) throw tableErr;
+                 addLog(`Table Check Info: ${tableErr.message}`);
+                 // Continue to SDK anyway, maybe it can handle it
+            }
+
+            // STEP 2: SDK PING
+            addLog('Step 2: Pinging database (SDK)...');
             
+            // We use the SDK now
             const { error: pingError } = await withTimeout(
                 supabase.from('connection_tests').select('id').limit(1)
             );
             
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+            setCountdown(null);
 
             if (pingError) {
                 if (pingError.code === '42P01') {
@@ -298,10 +341,10 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 }
                 throw new Error(`Ping Failed: ${pingError.message} (${pingError.code || 'No Code'})`);
             }
-            addLog(`Ping successful. Connection established.`);
+            addLog(`Ping successful. SDK Connected.`);
 
-            // STEP 2: WRITE
-            addLog(`Step 2: Writing "${inputVal}"...`);
+            // STEP 3: WRITE
+            addLog(`Step 3: Writing "${inputVal}"...`);
             const { data: insertData, error: insertError } = await withTimeout(
                 supabase.from('connection_tests')
                 .insert([{ 
@@ -317,8 +360,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             addLog('Write successful. Row ID: ' + insertData.id);
             setStatus('reading');
 
-            // STEP 3: READ BACK
-            addLog('Step 3: Verifying data...');
+            // STEP 4: READ BACK
+            addLog('Step 4: Verifying data...');
             const { data: readData, error: readError } = await withTimeout(
                 supabase.from('connection_tests')
                 .select('message')
@@ -336,27 +379,28 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
         } catch (err: any) {
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
+            setCountdown(null);
+            
             console.error(err);
             const msg = err.message || 'Unknown error';
             addLog('ERROR: ' + msg);
             
             if (msg.includes('timed out') || msg.includes('Failed to fetch') || msg.includes('Network Reachability')) {
                 addLog('------------------------------------------------');
-                addLog('DIAGNOSIS: CONNECTION TIMEOUT / BLOCKED');
-                addLog('1. Check VITE_SUPABASE_URL in Coolify (No quotes!).');
-                addLog('2. DB might be paused (7-day inactivity).');
-                addLog('3. Disable AdBlockers (uBlock, etc).');
+                addLog('DIAGNOSIS: CONNECTION TIMEOUT / PAUSED');
+                addLog('1. Database is waking up (Wait 1 min and try again).');
+                addLog('2. Check VITE_SUPABASE_URL in Coolify.');
                 addLog('------------------------------------------------');
-            } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission')) {
+            } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission') || msg.includes('404')) {
                 addLog('------------------------------------------------');
-                addLog('DIAGNOSIS: RLS / PERMISSIONS');
-                addLog('Run the "Copy SQL Fix" script below.');
+                addLog('DIAGNOSIS: MISSING TABLE OR RLS POLICY');
+                addLog('The app cannot write to the database yet.');
+                addLog('SOLUTION: Click "Copy SQL Fixes" below and run in Supabase SQL Editor.');
                 addLog('------------------------------------------------');
             } else if (msg.includes('401')) {
                 addLog('------------------------------------------------');
                 addLog('DIAGNOSIS: INVALID API KEY');
                 addLog('See KEY INSPECTOR above.');
-                addLog('You likely need to Redeploy to apply new keys.');
                 addLog('------------------------------------------------');
             }
 
@@ -402,9 +446,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks <code>auth.role() IN (...)</code> to satisfy security linter.</li>
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
                     </ul>
-                    <p className="mt-2 text-xs opacity-80 italic">
-                        Note: "Leaked Password Protection" warnings must be fixed manually in the Supabase Dashboard.
-                    </p>
                 </div>
 
                 {/* VISUALIZER */}
@@ -432,6 +473,14 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                                 />
                             )}
                         </div>
+                        {/* Countdown Overlay */}
+                        {countdown !== null && (
+                            <div className="absolute inset-0 flex items-center justify-center -top-6">
+                                <span className="bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Timer size={10} /> Waking Up: {countdown}s
+                                </span>
+                            </div>
+                        )}
                     </div>
 
                     {/* DB */}
