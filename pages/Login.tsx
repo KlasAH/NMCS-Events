@@ -69,18 +69,32 @@ const Login: React.FC = () => {
 
     // Logic: Check if identifier is an email (contains @). If not, assume it's a username and lookup email.
     if (!identifier.includes('@')) {
-        const { data, error: lookupError } = await supabase
-            .from('profiles')
-            .select('email')
-            .eq('username', identifier)
-            .single();
-        
-        if (lookupError || !data) {
-            setError(t('userNotFound'));
+        try {
+            const { data, error: lookupError } = await supabase
+                .from('profiles')
+                .select('email')
+                .eq('username', identifier)
+                .maybeSingle(); // Use maybeSingle to avoid 406 errors on 0 rows
+            
+            if (lookupError) {
+                console.error("Username lookup failed:", lookupError);
+                setError("System error looking up username.");
+                setFormLoading(false);
+                return;
+            }
+
+            if (!data) {
+                setError(t('userNotFound'));
+                setFormLoading(false);
+                return;
+            }
+            signInEmail = data.email;
+        } catch (err) {
+            console.error("Unexpected lookup error:", err);
+            setError("Unexpected error.");
             setFormLoading(false);
             return;
         }
-        signInEmail = data.email;
     }
 
     const { error } = await supabase.auth.signInWithPassword({

@@ -58,43 +58,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const checkAdmin = async (currentSession: Session) => {
     try {
+      console.log(`[Auth] Checking admin status for ${currentSession.user.email}...`);
       let adminStatus = false;
 
-      // 1. Try RPC (Fastest method)
-      // We ignore errors here to allow fallback to work
-      const { data: rpcIsAdmin, error: rpcError } = await supabase.rpc('is_admin');
-      
-      if (!rpcError && rpcIsAdmin === true) {
-        adminStatus = true;
+      // 1. PRIMARY CHECK: Check the 'profiles' table directly.
+      // This matches the screenshot provided by the user showing the 'role' column.
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', currentSession.user.id)
+        .single();
+
+      if (profile) {
+          console.log(`[Auth] Profile role found: ${profile.role}`);
+          if (profile.role === 'admin' || profile.role === 'board') {
+              adminStatus = true;
+          }
+      } else if (profileError) {
+          console.warn("[Auth] Profile fetch error:", profileError.message);
       }
 
-      // 2. Fallback: Manual Table Check
-      // If RPC failed or returned false, we double-check the profiles table directly.
-      // This handles cases where the RPC might be out of sync or RLS issues occurred.
+      // 2. FALLBACK: Try RPC if profile check was inconclusive or failed
       if (!adminStatus) {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', currentSession.user.id)
-            .single();
-            
-        if (profile?.role === 'admin' || profile?.role === 'board') {
+        const { data: rpcIsAdmin, error: rpcError } = await supabase.rpc('is_admin');
+        if (!rpcError && rpcIsAdmin === true) {
+            console.log("[Auth] RPC 'is_admin' returned true");
             adminStatus = true;
-        } else {
-            // 3. Legacy Check: User Roles table
-            const { data: roleData } = await supabase
-                .from('user_roles')
-                .select('role')
-                .eq('user_id', currentSession.user.id)
-                .single();
-            
-            if (roleData?.role === 'admin' || roleData?.role === 'board') {
-                adminStatus = true;
-            }
         }
       }
 
+      // 3. LEGACY FALLBACK: Check 'user_roles' table
+      if (!adminStatus) {
+        const { data: roleData } = await supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', currentSession.user.id)
+            .single();
+        
+        if (roleData?.role === 'admin' || roleData?.role === 'board') {
+            console.log("[Auth] Legacy 'user_roles' found admin");
+            adminStatus = true;
+        }
+      }
+
+      console.log(`[Auth] Final Admin Status: ${adminStatus}`);
       setIsAdmin(adminStatus);
+
     } catch (e) {
       console.error("Unexpected error checking admin status:", e);
       setIsAdmin(false);
