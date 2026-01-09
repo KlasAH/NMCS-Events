@@ -6,12 +6,12 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, Loader2, Database, ShieldCheck, Server } from 'lucide-react';
+import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, Loader2, Database, ShieldCheck, Server, LogOut } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { session, signIn, signInWithOAuth, signUp, sendPasswordReset, updatePassword, loading: authLoading } = useAuth();
+  const { session, signIn, signInWithOAuth, signUp, sendPasswordReset, updatePassword, signOut, loading: authLoading } = useAuth();
   const { t } = useLanguage();
   
   // 'login' | 'signup' | 'forgot' | 'reset-confirm'
@@ -204,13 +204,22 @@ const Login: React.FC = () => {
       }
   }
 
-  // If we are already authenticated but loading admin status, show loader
+  // If we are already authenticated but loading admin status, show loader with failsafe logout
   if (session && authLoading) {
       return (
-          <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+          <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 gap-6">
               <div className="animate-spin text-mini-red">
                   <Loader2 size={48} />
               </div>
+              <div className="text-slate-500 text-sm">Verifying access rights...</div>
+              
+              {/* Failsafe Button */}
+              <button 
+                onClick={() => signOut()}
+                className="flex items-center gap-2 text-slate-500 hover:text-mini-red transition-colors text-sm font-bold border border-slate-200 dark:border-slate-800 px-4 py-2 rounded-full bg-white dark:bg-slate-900 shadow-sm"
+              >
+                <LogOut size={14} /> Cancel & Log Out
+              </button>
           </div>
       );
   }

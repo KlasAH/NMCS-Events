@@ -45,7 +45,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(session);
       if (session) {
           // Reset loading to true to prevent premature 'Restricted' access during role check
-          setLoading(true);
+          // Only set loading if we aren't already admin, to avoid UI flickering
+          if (!isAdmin) setLoading(true);
           checkAdmin(session);
       } else {
           setIsAdmin(false);
@@ -59,53 +60,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const checkAdmin = async (currentSession: Session) => {
     try {
       console.log(`[Auth] Checking admin status for ${currentSession.user.email}...`);
-      let adminStatus = false;
+      
+      // Create a timeout promise to prevent hanging forever
+      const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Admin check timed out')), 10000)
+      );
 
-      // 1. PRIMARY CHECK: Check the 'profiles' table directly.
-      // This matches the screenshot provided by the user showing the 'role' column.
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', currentSession.user.id)
-        .single();
+      const checkLogic = async () => {
+          let adminStatus = false;
 
-      if (profile) {
-          console.log(`[Auth] Profile role found: ${profile.role}`);
-          if (profile.role === 'admin' || profile.role === 'board') {
-              adminStatus = true;
-          }
-      } else if (profileError) {
-          console.warn("[Auth] Profile fetch error:", profileError.message);
-      }
-
-      // 2. FALLBACK: Try RPC if profile check was inconclusive or failed
-      if (!adminStatus) {
-        const { data: rpcIsAdmin, error: rpcError } = await supabase.rpc('is_admin');
-        if (!rpcError && rpcIsAdmin === true) {
-            console.log("[Auth] RPC 'is_admin' returned true");
-            adminStatus = true;
-        }
-      }
-
-      // 3. LEGACY FALLBACK: Check 'user_roles' table
-      if (!adminStatus) {
-        const { data: roleData } = await supabase
-            .from('user_roles')
+          // 1. PRIMARY CHECK: Check the 'profiles' table directly.
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
             .select('role')
-            .eq('user_id', currentSession.user.id)
+            .eq('id', currentSession.user.id)
             .single();
-        
-        if (roleData?.role === 'admin' || roleData?.role === 'board') {
-            console.log("[Auth] Legacy 'user_roles' found admin");
-            adminStatus = true;
-        }
-      }
 
-      console.log(`[Auth] Final Admin Status: ${adminStatus}`);
-      setIsAdmin(adminStatus);
+          if (profile) {
+              console.log(`[Auth] Profile role found: ${profile.role}`);
+              if (profile.role === 'admin' || profile.role === 'board') {
+                  adminStatus = true;
+              }
+          } else if (profileError) {
+              console.warn("[Auth] Profile fetch error:", profileError.message);
+          }
+
+          // 2. FALLBACK: Try RPC if profile check was inconclusive or failed
+          if (!adminStatus) {
+            const { data: rpcIsAdmin, error: rpcError } = await supabase.rpc('is_admin');
+            if (!rpcError && rpcIsAdmin === true) {
+                console.log("[Auth] RPC 'is_admin' returned true");
+                adminStatus = true;
+            }
+          }
+
+          // 3. LEGACY FALLBACK: Check 'user_roles' table
+          if (!adminStatus) {
+            const { data: roleData } = await supabase
+                .from('user_roles')
+                .select('role')
+                .eq('user_id', currentSession.user.id)
+                .single();
+            
+            if (roleData?.role === 'admin' || roleData?.role === 'board') {
+                console.log("[Auth] Legacy 'user_roles' found admin");
+                adminStatus = true;
+            }
+          }
+          return adminStatus;
+      };
+
+      // Race the check against the timeout
+      const result = await Promise.race([checkLogic(), timeoutPromise]);
+      
+      console.log(`[Auth] Final Admin Status: ${result}`);
+      setIsAdmin(result as boolean);
 
     } catch (e) {
-      console.error("Unexpected error checking admin status:", e);
+      console.error("Error checking admin status (or timeout):", e);
+      // Default to false on error/timeout so user can at least see the UI
       setIsAdmin(false);
     } finally {
       setLoading(false);
@@ -113,13 +126,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    if (isDemoMode) {
-        setSession(null);
-        setIsAdmin(false);
-        return;
-    }
-    await supabase.auth.signOut();
+    // Optimistic UI update: Clear state immediately
+    setSession(null);
     setIsAdmin(false);
+    setLoading(false);
+
+    if (isDemoMode) return;
+
+    try {
+        await supabase.auth.signOut();
+    } catch (err) {
+        console.error("Sign out error:", err);
+    }
   };
 
   const signIn = async (email: string) => {
