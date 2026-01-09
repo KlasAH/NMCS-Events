@@ -110,15 +110,3 @@ export interface UserProfile {
   role: 'admin' | 'user' | 'board';
   car_model?: string; // New: Selected model preference
 }
-
-// Shim for missing react-router-dom types in the environment
-declare module 'react-router-dom' {
-  export const HashRouter: any;
-  export const Routes: any;
-  export const Route: any;
-  export const Link: any;
-  export const Navigate: any;
-  export const useLocation: any;
-  export const useNavigate: any;
-  export const useParams: any;
-}

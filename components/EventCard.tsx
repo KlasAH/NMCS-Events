@@ -1,6 +1,8 @@
+
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, MapPin, ArrowRight, Star } from 'lucide-react';
+// @ts-ignore
 import { Link } from 'react-router-dom';
 import { Meeting } from '../types';
 import { format } from 'date-fns';

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
+// @ts-ignore
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';

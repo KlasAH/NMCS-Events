@@ -1,4 +1,6 @@
+
 import React, { useEffect, useState, useMemo } from 'react';
+// @ts-ignore
 import { useParams, Link } from 'react-router-dom';
 import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
 import { Meeting, ExtraInfoSection, MapConfig } from '../types';
@@ -85,7 +87,7 @@ const mockDetailMeeting: Meeting = {
 }
 
 const EventDetails: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams();
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [loading, setLoading] = useState(true);
   const [showHotelModal, setShowHotelModal] = useState(false);

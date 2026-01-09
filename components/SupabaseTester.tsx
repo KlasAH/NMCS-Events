@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer, Globe } from 'lucide-react';
+import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer, Globe, Trash2, Edit2, Save, X, RefreshCw } from 'lucide-react';
 import Modal from './Modal';
 import { motion } from 'framer-motion';
 
@@ -48,8 +48,8 @@ BEGIN
 END;
 $$;
 
--- 2. FIX: Security Warning "RLS Policy Always True" for connection tests
--- We replace the loose "ALL" policy with specific INSERT/SELECT policies
+-- 2. FIX: Security Warning & Enable Full CRUD for Tester
+-- We replace the loose "ALL" policy with specific policies allowing public access for this test table.
 CREATE TABLE IF NOT EXISTS public.connection_tests (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   message TEXT,
@@ -62,9 +62,13 @@ ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
+DROP POLICY IF EXISTS "Public can update tests" ON public.connection_tests;
+DROP POLICY IF EXISTS "Public can delete tests" ON public.connection_tests;
 
 CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT USING (true);
+CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE USING (true);
+CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE USING (true);
 
 -- 3. FIX: Performance "Unindexed Foreign Keys"
 CREATE INDEX IF NOT EXISTS idx_itinerary_meeting_id ON public.itinerary_items(meeting_id);
@@ -81,6 +85,11 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const [logs, setLogs] = useState<string[]>([]);
     const [copied, setCopied] = useState(false);
     
+    // Table Data State
+    const [tableRows, setTableRows] = useState<any[]>([]);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editValue, setEditValue] = useState('');
+    
     // Timer ref to show "Waking up" messages
     const coldStartTimer = useRef<any>(null);
 
@@ -93,13 +102,40 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     };
 
     // Helper to timeout a promise
-    // INCREASED to 65s for Supabase Free Tier Cold Starts (Slightly longer than fetch timeout to catch inner errors)
     const withTimeout = (promise: any, ms: number = 65000) => {
         return Promise.race([
             promise,
             new Promise((_, reject) => setTimeout(() => reject(new Error(`Connection timed out (${ms/1000}s).`)), ms))
         ]);
     };
+
+    const fetchLatestRows = async () => {
+        if (isDemoMode) {
+            setTableRows([
+                { id: 'mock-1', message: 'Demo Data 1', created_at: new Date().toISOString() },
+                { id: 'mock-2', message: 'Demo Data 2', created_at: new Date().toISOString() }
+            ]);
+            return;
+        }
+
+        const { data, error } = await supabase
+            .from('connection_tests')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(5);
+        
+        if (error) {
+            addLog(`Fetch Error: ${error.message}`);
+        } else {
+            setTableRows(data || []);
+        }
+    };
+
+    useEffect(() => {
+        if (isOpen) {
+            fetchLatestRows();
+        }
+    }, [isOpen]);
 
     const handleTest = async () => {
         if (!inputVal) return;
@@ -115,7 +151,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             // @ts-ignore
             if (typeof import.meta !== 'undefined' && import.meta.env) {
                  // @ts-ignore
-                 // Sanitize here too just in case
                  envUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/^['"]|['"]$/g, '').trim();
                  // @ts-ignore
                  envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').replace(/^['"]|['"]$/g, '').trim();
@@ -131,7 +166,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return;
         }
 
-        // Sanitized check
         if (envUrl.includes('"') || envUrl.includes("'") || envUrl.includes(" ")) {
             addLog('ERROR: URL contains invalid characters (quotes/spaces).');
             addLog('We attempted to clean it, but check your Coolify settings.');
@@ -141,7 +175,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         
         if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
         
-        // Show a helpful message if it takes longer than 3 seconds
         coldStartTimer.current = setTimeout(() => {
              addLog('⚠️ Slow response detected.');
              addLog('Database might be "Paused" (Free Tier limit).');
@@ -157,20 +190,19 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     addLog('Demo Mode: Read successful.');
                     setOutputVal(inputVal);
                     setStatus('success');
+                    fetchLatestRows();
                 }, 800);
             }, 800);
             return;
         }
 
         try {
-            // STEP 0: DIRECT HTTP CHECK (Bypassing SDK)
-            // This proves if we can actually reach the internet/server
+            // STEP 0: DIRECT HTTP CHECK
             addLog('Step 0: Network Reachability Check...');
             try {
-                // Ping the Supabase REST endpoint root
                 const restUrl = `${envUrl}/rest/v1/`;
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for pure ping
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
                 
                 const response = await fetch(restUrl, {
                     method: 'GET',
@@ -183,8 +215,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 clearTimeout(timeoutId);
                 
                 if (response.ok || response.status === 404) {
-                    // 404 is fine here, it means we reached the server and it replied "No route", but we connected!
-                    // 200 is better.
                     addLog(`Network OK. Status: ${response.status}`);
                 } else {
                     addLog(`Network Warning. Server replied: ${response.status} ${response.statusText}`);
@@ -197,18 +227,16 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 throw new Error('Network Reachability Failed');
             }
 
-            // STEP 1: SDK PING (Simple Select)
+            // STEP 1: SDK PING
             addLog('Step 1: Pinging database (SDK)...');
             
             const { error: pingError } = await withTimeout(
                 supabase.from('connection_tests').select('id').limit(1)
             );
             
-            // Clear the "waking up" timer as soon as we get a response
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
 
             if (pingError) {
-                // If the table doesn't exist, we'll get a specific error code 42P01
                 if (pingError.code === '42P01') {
                      throw new Error('Table "connection_tests" not found. Run the SQL Fix.');
                 }
@@ -247,6 +275,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             addLog(`Read successful. Value: "${readData.message}"`);
             setOutputVal(readData.message);
             setStatus('success');
+            
+            fetchLatestRows();
 
         } catch (err: any) {
             if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
@@ -254,7 +284,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             const msg = err.message || 'Unknown error';
             addLog('ERROR: ' + msg);
             
-            // Heuristic diagnostics for Frontend/Vite based on user context
             if (msg.includes('timed out') || msg.includes('Failed to fetch') || msg.includes('Network Reachability')) {
                 addLog('------------------------------------------------');
                 addLog('DIAGNOSIS: CONNECTION TIMEOUT / BLOCKED');
@@ -265,12 +294,36 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission')) {
                 addLog('------------------------------------------------');
                 addLog('DIAGNOSIS: RLS / PERMISSIONS');
-                addLog('The app connected, but was blocked from reading.');
                 addLog('Run the "Copy SQL Fix" script below.');
                 addLog('------------------------------------------------');
             }
 
             setStatus('error');
+        }
+    };
+
+    const handleDelete = async (id: string) => {
+        addLog(`Deleting row ${id.slice(0, 8)}...`);
+        const { error } = await supabase.from('connection_tests').delete().eq('id', id);
+        if (error) {
+            addLog(`Delete Failed: ${error.message}`);
+            if (error.message.includes('policy')) addLog('Hint: Run the SQL Fix below to enable Deletes.');
+        } else {
+            addLog('Delete successful.');
+            fetchLatestRows();
+        }
+    };
+
+    const handleUpdate = async (id: string) => {
+        addLog(`Updating row ${id.slice(0, 8)}...`);
+        const { error } = await supabase.from('connection_tests').update({ message: editValue }).eq('id', id);
+        if (error) {
+            addLog(`Update Failed: ${error.message}`);
+            if (error.message.includes('policy')) addLog('Hint: Run the SQL Fix below to enable Updates.');
+        } else {
+            addLog('Update successful.');
+            setEditingId(null);
+            fetchLatestRows();
         }
     };
 
@@ -359,6 +412,64 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     </div>
                 </div>
 
+                {/* Stored Data Table */}
+                <div>
+                    <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Stored Data (Last 5)</label>
+                        <button onClick={fetchLatestRows} className="text-xs text-blue-500 hover:underline flex items-center gap-1">
+                            <RefreshCw size={10} /> Refresh
+                        </button>
+                    </div>
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+                        <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+                                <tr>
+                                    <th className="p-3 text-slate-500 font-bold w-20">ID</th>
+                                    <th className="p-3 text-slate-500 font-bold">Message</th>
+                                    <th className="p-3 text-slate-500 font-bold text-right w-20">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {tableRows.map(row => (
+                                    <tr key={row.id}>
+                                        <td className="p-3 font-mono text-slate-400">{row.id.slice(0,6)}...</td>
+                                        <td className="p-3">
+                                            {editingId === row.id ? (
+                                                <input 
+                                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 outline-none focus:border-mini-red"
+                                                    value={editValue}
+                                                    onChange={e => setEditValue(e.target.value)}
+                                                    autoFocus
+                                                />
+                                            ) : (
+                                                <span className="text-slate-700 dark:text-slate-300">{row.message}</span>
+                                            )}
+                                        </td>
+                                        <td className="p-3 text-right">
+                                            <div className="flex justify-end gap-2">
+                                                {editingId === row.id ? (
+                                                    <>
+                                                        <button onClick={() => handleUpdate(row.id)} className="text-green-600 hover:text-green-700 p-1 bg-green-50 dark:bg-green-900/30 rounded"><Save size={14}/></button>
+                                                        <button onClick={() => setEditingId(null)} className="text-slate-400 hover:text-slate-600 p-1 bg-slate-50 dark:bg-slate-800 rounded"><X size={14}/></button>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <button onClick={() => { setEditingId(row.id); setEditValue(row.message); }} className="text-blue-500 hover:text-blue-600 p-1 bg-blue-50 dark:bg-blue-900/30 rounded"><Edit2 size={14}/></button>
+                                                        <button onClick={() => handleDelete(row.id)} className="text-red-500 hover:text-red-600 p-1 bg-red-50 dark:bg-red-900/30 rounded"><Trash2 size={14}/></button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {tableRows.length === 0 && (
+                                    <tr><td colSpan={3} className="p-6 text-center text-slate-400 italic">No data found in 'connection_tests'.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 {/* SQL Fix Section */}
                 <div className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl p-4 flex flex-col gap-3">
                     <div className="flex items-start gap-3">
@@ -366,7 +477,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <div>
                             <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm">Apply Database Fixes</h4>
                             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                Run this SQL to fix Security Warnings and Performance Issues.
+                                Run this SQL to fix Security Warnings, Permissions, and Performance Issues.
                             </p>
                         </div>
                     </div>

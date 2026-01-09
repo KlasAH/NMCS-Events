@@ -6,6 +6,7 @@ import EventCard from '../components/EventCard';
 import { motion } from 'framer-motion';
 import { Search, Database } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+// @ts-ignore
 import { useNavigate } from 'react-router-dom';
 import SupabaseTester from '../components/SupabaseTester';
 

@@ -1,5 +1,6 @@
 
 import React from 'react';
+// @ts-ignore
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
