@@ -4,8 +4,8 @@ import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Bug, RefreshCw } from 'lucide-react';
-import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem } from '../types';
+import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Bug, RefreshCw, MapPin, Building2, Car, Link as LinkIcon, Utensils, Flag, Map } from 'lucide-react';
+import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem, HotelDetails, ParkingDetails } from '../types';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
 import { createClient } from '@supabase/supabase-js';
@@ -208,20 +208,6 @@ const AdminDashboard: React.FC = () => {
                         )}
                     </div>
                 </div>
-
-                <div className="bg-slate-50 dark:bg-slate-800 p-6 rounded-xl text-left text-sm text-slate-600 dark:text-slate-400 mb-8 border border-slate-100 dark:border-slate-700">
-                    <p className="font-bold mb-3 flex items-center gap-2 text-slate-900 dark:text-white text-base">
-                        <UserCog size={18}/> Board Member Setup:
-                    </p>
-                    <p className="mb-2">To grant access, you must update the user's role in the database:</p>
-                    <ol className="list-decimal ml-5 space-y-2 marker:text-mini-red marker:font-bold">
-                        <li>Go to <strong>Supabase Dashboard</strong> &gt; <strong>Table Editor</strong></li>
-                        <li>Open the <code>profiles</code> table</li>
-                        <li>Find the user row with ID: <code className="bg-slate-200 dark:bg-slate-900 px-1 rounded">{session.user.id.slice(0,8)}...</code></li>
-                        <li>Change the <code>role</code> column to <code>board</code> or <code>admin</code></li>
-                        <li>Click <strong>Save</strong></li>
-                    </ol>
-                </div>
                 
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                     <button 
@@ -270,20 +256,128 @@ const AdminDashboard: React.FC = () => {
       }
   }
 
+  // --- EDITOR LOGIC ---
+
   const startEditEvent = (evt?: Meeting) => {
       if(evt) {
           setEditingEventData(evt);
       } else {
+          // Initialize with empty structures for nested objects to avoid undefined errors
           setEditingEventData({
               title: '',
               date: new Date().toISOString().split('T')[0],
               description: '',
               location_name: '',
               cover_image_url: '',
+              maps_config: [], // Initialize array
+              hotel_info: { 
+                  name: '', address: '', map_url: '', price_single: '', price_double: '', description: '', booking_links: [] 
+              },
+              parking_info: { 
+                  location: '', cost: '', security_info: '', apps: [], map_url: '' 
+              },
               extra_info: []
           });
       }
       setIsEditingEvent(true);
+  }
+
+  const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newStart = e.target.value;
+      
+      // Auto-calculate end date (start + 2 days)
+      let newEnd = '';
+      if (newStart) {
+          const d = new Date(newStart);
+          d.setDate(d.getDate() + 2);
+          newEnd = d.toISOString().split('T')[0];
+      }
+
+      setEditingEventData({
+          ...editingEventData,
+          date: newStart,
+          end_date: newEnd
+      });
+  };
+
+  // Helper to handle nested object updates safely
+  const updateHotelField = (field: keyof HotelDetails, value: any) => {
+      setEditingEventData(prev => ({
+          ...prev,
+          hotel_info: {
+              ...(prev.hotel_info || { name: '', address: '', map_url: '', price_single: '', price_double: '', description: '' }),
+              [field]: value
+          }
+      }));
+  };
+
+  const updateParkingField = (field: keyof ParkingDetails, value: any) => {
+      setEditingEventData(prev => ({
+          ...prev,
+          parking_info: {
+              ...(prev.parking_info || { location: '', cost: '', security_info: '' }),
+              [field]: value
+          }
+      }));
+  };
+
+  const updateMapLink = (url: string) => {
+      // Maps config is an array. We treat the first item as the "Main Location Link"
+      const currentMaps = [...(editingEventData.maps_config || [])];
+      if (currentMaps.length === 0) {
+          currentMaps.push({ label: 'Main Location', url: url, groupName: 'General' });
+      } else {
+          currentMaps[0] = { ...currentMaps[0], url: url };
+      }
+      setEditingEventData({ ...editingEventData, maps_config: currentMaps });
+  };
+  
+  const getMainMapLink = () => {
+      return editingEventData.maps_config?.[0]?.url || '';
+  };
+
+  const updateBookingLink = (url: string) => {
+    // Hotel booking links is an array. We update/create the first item.
+    const currentInfo = editingEventData.hotel_info || { name: '', address: '', map_url: '', price_single: '', price_double: '', description: '' };
+    const currentLinks = [...(currentInfo.booking_links || [])];
+    
+    if (currentLinks.length === 0) {
+        currentLinks.push({ label: 'Book Now', url: url });
+    } else {
+        currentLinks[0] = { ...currentLinks[0], url: url };
+    }
+    
+    setEditingEventData(prev => ({
+        ...prev,
+        hotel_info: { ...currentInfo, booking_links: currentLinks }
+    }));
+  };
+
+  const getBookingLink = () => {
+      return editingEventData.hotel_info?.booking_links?.[0]?.url || '';
+  };
+
+  const updateExtraInfo = (index: number, field: keyof ExtraInfoSection, value: any) => {
+      const newExtra = [...(editingEventData.extra_info || [])];
+      newExtra[index] = { ...newExtra[index], [field]: value };
+      setEditingEventData({...editingEventData, extra_info: newExtra});
+  }
+
+  const addExtraInfo = (type: 'food' | 'racing' | 'roadtrip' | 'general') => {
+      const newExtra: ExtraInfoSection = {
+          id: `new-${Date.now()}`,
+          type: type,
+          title: type === 'food' ? 'Food & Dining' : type === 'racing' ? 'Racing Track Info' : 'New Section',
+          icon: type === 'food' ? 'utensils' : type === 'racing' ? 'flag' : type === 'roadtrip' ? 'map' : 'info',
+          content: '',
+      };
+      setEditingEventData({...editingEventData, extra_info: [...(editingEventData.extra_info || []), newExtra]});
+  }
+
+  const removeExtraInfo = (index: number) => {
+      const newExtra = [...(editingEventData.extra_info || [])];
+      newExtra.splice(index, 1);
+      setEditingEventData({...editingEventData, extra_info: newExtra});
   }
 
   const saveEvent = async () => {
@@ -317,29 +411,6 @@ const AdminDashboard: React.FC = () => {
           if(data) setEvents(data);
           setIsEditingEvent(false);
       }
-  }
-
-  const updateExtraInfo = (index: number, field: keyof ExtraInfoSection, value: any) => {
-      const newExtra = [...(editingEventData.extra_info || [])];
-      newExtra[index] = { ...newExtra[index], [field]: value };
-      setEditingEventData({...editingEventData, extra_info: newExtra});
-  }
-
-  const addExtraInfo = () => {
-      const newExtra: ExtraInfoSection = {
-          id: `new-${Date.now()}`,
-          type: 'general',
-          title: 'New Section',
-          icon: 'info',
-          content: '',
-      };
-      setEditingEventData({...editingEventData, extra_info: [...(editingEventData.extra_info || []), newExtra]});
-  }
-
-  const removeExtraInfo = (index: number) => {
-      const newExtra = [...(editingEventData.extra_info || [])];
-      newExtra.splice(index, 1);
-      setEditingEventData({...editingEventData, extra_info: newExtra});
   }
 
   const filteredRegistrations = registrations.filter(r => 
@@ -420,15 +491,19 @@ const AdminDashboard: React.FC = () => {
                         </button>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div className="space-y-4">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-12">
+                        {/* LEFT COLUMN: BASIC INFO & MAPS */}
+                        <div className="space-y-6">
+                            <h3 className="font-bold text-mini-red flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+                                <Star size={18} /> Basic Info
+                            </h3>
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Event Title</label>
                                 <input 
                                     type="text" 
                                     value={editingEventData.title || ''}
                                     onChange={(e) => setEditingEventData({...editingEventData, title: e.target.value})}
-                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
                                 />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
@@ -437,50 +512,281 @@ const AdminDashboard: React.FC = () => {
                                     <input 
                                         type="date" 
                                         value={editingEventData.date || ''}
-                                        onChange={(e) => setEditingEventData({...editingEventData, date: e.target.value})}
-                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                                        onChange={handleStartDateChange}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">End Date (Optional)</label>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">End Date</label>
                                     <input 
                                         type="date" 
                                         value={editingEventData.end_date || ''}
                                         onChange={(e) => setEditingEventData({...editingEventData, end_date: e.target.value})}
-                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
                                     />
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Location</label>
-                                <input 
-                                    type="text" 
-                                    value={editingEventData.location_name || ''}
-                                    onChange={(e) => setEditingEventData({...editingEventData, location_name: e.target.value})}
-                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                                />
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Location Name</label>
+                                    <input 
+                                        type="text" 
+                                        value={editingEventData.location_name || ''}
+                                        onChange={(e) => setEditingEventData({...editingEventData, location_name: e.target.value})}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Google Maps Link</label>
+                                    <div className="relative">
+                                        <input 
+                                            type="text" 
+                                            value={getMainMapLink()}
+                                            onChange={(e) => updateMapLink(e.target.value)}
+                                            placeholder="https://maps.google.com/..."
+                                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        />
+                                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                    </div>
+                                </div>
                             </div>
+
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Description</label>
                                 <textarea 
                                     rows={4}
                                     value={editingEventData.description || ''}
                                     onChange={(e) => setEditingEventData({...editingEventData, description: e.target.value})}
-                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
                                 />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Cover Image URL</label>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 items-start">
                                     <input 
                                         type="text" 
                                         value={editingEventData.cover_image_url || ''}
                                         onChange={(e) => setEditingEventData({...editingEventData, cover_image_url: e.target.value})}
-                                        className="flex-grow px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                                        className="flex-grow px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
                                     />
-                                    <div className="text-xs text-slate-500 self-center whitespace-nowrap px-2 bg-slate-100 dark:bg-slate-800 rounded">
-                                        Optimal: 1920x1080px
+                                </div>
+                                {editingEventData.cover_image_url && (
+                                    <div className="mt-2 h-32 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                                        <img src={editingEventData.cover_image_url} alt="Cover Preview" className="w-full h-full object-cover" />
                                     </div>
+                                )}
+                            </div>
+
+                            {/* HOTEL SECTION */}
+                            <h3 className="font-bold text-mini-red flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2 mt-8">
+                                <Building2 size={18} /> Hotel Details
+                            </h3>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Hotel Name</label>
+                                    <input 
+                                        type="text" 
+                                        value={editingEventData.hotel_info?.name || ''}
+                                        onChange={(e) => updateHotelField('name', e.target.value)}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                     <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Single Price</label>
+                                        <input 
+                                            type="text" 
+                                            value={editingEventData.hotel_info?.price_single || ''}
+                                            onChange={(e) => updateHotelField('price_single', e.target.value)}
+                                            placeholder="1500 SEK"
+                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Double Price</label>
+                                        <input 
+                                            type="text" 
+                                            value={editingEventData.hotel_info?.price_double || ''}
+                                            onChange={(e) => updateHotelField('price_double', e.target.value)}
+                                            placeholder="2000 SEK"
+                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Address</label>
+                                    <input 
+                                        type="text" 
+                                        value={editingEventData.hotel_info?.address || ''}
+                                        onChange={(e) => updateHotelField('address', e.target.value)}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                                    <textarea 
+                                        rows={3}
+                                        value={editingEventData.hotel_info?.description || ''}
+                                        onChange={(e) => updateHotelField('description', e.target.value)}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                     <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Booking Link</label>
+                                        <input 
+                                            type="text" 
+                                            value={getBookingLink()}
+                                            onChange={(e) => updateBookingLink(e.target.value)}
+                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        />
+                                    </div>
+                                     <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Map Link</label>
+                                        <input 
+                                            type="text" 
+                                            value={editingEventData.hotel_info?.map_url || ''}
+                                            onChange={(e) => updateHotelField('map_url', e.target.value)}
+                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Hotel Image URL</label>
+                                    <input 
+                                        type="text" 
+                                        value={editingEventData.hotel_info?.image_url || ''}
+                                        onChange={(e) => updateHotelField('image_url', e.target.value)}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                    {editingEventData.hotel_info?.image_url && (
+                                        <div className="mt-2 h-24 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                                            <img src={editingEventData.hotel_info.image_url} alt="Hotel Preview" className="w-full h-full object-cover" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* RIGHT COLUMN: PARKING & EXTRAS */}
+                        <div className="space-y-6">
+                            {/* PARKING */}
+                            <h3 className="font-bold text-mini-red flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+                                <Car size={18} /> Parking Details
+                            </h3>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Parking Location / Name</label>
+                                    <input 
+                                        type="text" 
+                                        value={editingEventData.parking_info?.location || ''}
+                                        onChange={(e) => updateParkingField('location', e.target.value)}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Cost</label>
+                                        <input 
+                                            type="text" 
+                                            value={editingEventData.parking_info?.cost || ''}
+                                            onChange={(e) => updateParkingField('cost', e.target.value)}
+                                            placeholder="Included / 200 SEK"
+                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Map Link</label>
+                                        <input 
+                                            type="text" 
+                                            value={editingEventData.parking_info?.map_url || ''}
+                                            onChange={(e) => updateParkingField('map_url', e.target.value)}
+                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Security / Access Info</label>
+                                    <textarea
+                                        rows={2} 
+                                        value={editingEventData.parking_info?.security_info || ''}
+                                        onChange={(e) => updateParkingField('security_info', e.target.value)}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Parking Image URL</label>
+                                    <input 
+                                        type="text" 
+                                        value={editingEventData.parking_info?.image_url || ''}
+                                        onChange={(e) => updateParkingField('image_url', e.target.value)}
+                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                    />
+                                    {editingEventData.parking_info?.image_url && (
+                                        <div className="mt-2 h-24 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                                            <img src={editingEventData.parking_info.image_url} alt="Parking Preview" className="w-full h-full object-cover" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* EXTRA INFO */}
+                            <h3 className="font-bold text-mini-red flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2 mt-8">
+                                <Plus size={18} /> Extra Info Sections
+                            </h3>
+                            <div className="space-y-4">
+                                {editingEventData.extra_info?.map((extra, idx) => (
+                                    <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 relative group">
+                                        <button 
+                                            onClick={() => removeExtraInfo(idx)}
+                                            className="absolute top-2 right-2 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                        
+                                        <div className="flex items-center gap-2 mb-3">
+                                            {extra.type === 'food' && <Utensils className="text-orange-500" size={20} />}
+                                            {extra.type === 'racing' && <Flag className="text-red-500" size={20} />}
+                                            {extra.type === 'roadtrip' && <Map className="text-blue-500" size={20} />}
+                                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">{extra.type}</span>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <input 
+                                                type="text" 
+                                                value={extra.title}
+                                                onChange={(e) => updateExtraInfo(idx, 'title', e.target.value)}
+                                                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 font-bold"
+                                                placeholder="Section Title"
+                                            />
+                                            <textarea 
+                                                rows={2}
+                                                value={extra.content}
+                                                onChange={(e) => updateExtraInfo(idx, 'content', e.target.value)}
+                                                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm"
+                                                placeholder="Content description..."
+                                            />
+                                            <input 
+                                                type="text" 
+                                                value={extra.image_url || ''}
+                                                onChange={(e) => updateExtraInfo(idx, 'image_url', e.target.value)}
+                                                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"
+                                                placeholder="Image URL"
+                                            />
+                                            {extra.image_url && (
+                                                <div className="h-16 w-full rounded-lg overflow-hidden">
+                                                    <img src={extra.image_url} alt="Preview" className="w-full h-full object-cover" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+
+                                <div className="flex gap-2 justify-center pt-2">
+                                    <button onClick={() => addExtraInfo('food')} className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold hover:bg-orange-200">+ Food</button>
+                                    <button onClick={() => addExtraInfo('racing')} className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold hover:bg-red-200">+ Racing</button>
+                                    <button onClick={() => addExtraInfo('roadtrip')} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold hover:bg-blue-200">+ Road Trip</button>
                                 </div>
                             </div>
                         </div>
@@ -516,9 +822,14 @@ const AdminDashboard: React.FC = () => {
                             <h2 className="text-xl font-bold mb-4 border-b border-slate-100 dark:border-slate-800 pb-2 text-slate-900 dark:text-white">Active Events</h2>
                             {events.length === 0 ? <p className="text-slate-400">No events found.</p> : events.map((evt) => (
                                 <div key={evt.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-slate-100 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors gap-4">
-                                    <div>
-                                        <p className="font-bold text-slate-900 dark:text-white text-lg">{evt.title}</p>
-                                        <p className="text-sm text-slate-500 dark:text-slate-400">{evt.date} | {evt.location_name}</p>
+                                    <div className="flex items-center gap-4">
+                                        {evt.cover_image_url && (
+                                            <img src={evt.cover_image_url} alt="thumb" className="w-16 h-12 rounded-lg object-cover hidden sm:block" />
+                                        )}
+                                        <div>
+                                            <p className="font-bold text-slate-900 dark:text-white text-lg">{evt.title}</p>
+                                            <p className="text-sm text-slate-500 dark:text-slate-400">{evt.date} | {evt.location_name}</p>
+                                        </div>
                                     </div>
                                     <div className="flex gap-2">
                                         <button 

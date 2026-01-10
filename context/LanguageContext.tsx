@@ -35,6 +35,17 @@ const translations: Translations = {
   food: { sv: 'Mat & Dryck', en: 'Food & Drink' },
   track: { sv: 'Bana / Racing', en: 'Track / Racing' },
 
+  // Registration
+  registerForEvent: { sv: 'Anmäl dig', en: 'Register for Event' },
+  joinEvent: { sv: 'Delta i eventet', en: 'Join Event' },
+  alreadyRegistered: { sv: 'Du är anmäld', en: 'You are registered' },
+  phone: { sv: 'Telefonnummer', en: 'Phone Number' },
+  forumName: { sv: 'Forumnamn', en: 'Forum Name' },
+  carType: { sv: 'Bilmodell', en: 'Car Model' },
+  confirmRegistration: { sv: 'Bekräfta anmälan', en: 'Confirm Registration' },
+  registrationSuccess: { sv: 'Tack för din anmälan!', en: 'Thanks for registering!' },
+  registrationError: { sv: 'Något gick fel. Försök igen.', en: 'Something went wrong. Try again.' },
+
   // Login / Auth Strings
   loginHeader: { sv: 'Endast för styrelsen', en: 'Board Members Only' },
   loginSub: { sv: 'Åtkomst till administration', en: 'Access to administration' },

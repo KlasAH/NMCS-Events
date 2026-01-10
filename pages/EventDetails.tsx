@@ -7,10 +7,11 @@ import { Meeting, ExtraInfoSection, MapConfig } from '../types';
 import Itinerary from '../components/Itinerary';
 import Modal from '../components/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink, Download } from 'lucide-react';
+import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink, Download, UserPlus, CheckCircle, Mail, User, Phone, MessageSquare, Loader2 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { format } from 'date-fns';
 import { useLanguage } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
 import sv from 'date-fns/locale/sv';
 import enGB from 'date-fns/locale/en-GB';
 
@@ -88,11 +89,18 @@ const mockDetailMeeting: Meeting = {
 
 const EventDetails: React.FC = () => {
   const { id } = useParams();
+  const { session } = useAuth();
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [loading, setLoading] = useState(true);
   const [showHotelModal, setShowHotelModal] = useState(false);
   const [showParkingModal, setShowParkingModal] = useState(false);
   const [selectedExtraInfo, setSelectedExtraInfo] = useState<ExtraInfoSection | null>(null);
+  
+  // Registration State
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [regForm, setRegForm] = useState({ fullName: '', email: '', phone: '', forumName: '', carType: '' });
+  const [regStatus, setRegStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   
   // Map Collapse State
   const [expandedMapGroups, setExpandedMapGroups] = useState<Record<string, boolean>>({});
@@ -104,16 +112,21 @@ const EventDetails: React.FC = () => {
     if (isDemoMode) {
         setMeeting(mockDetailMeeting);
         if(mockDetailMeeting.maps_config) {
-             // Default expand first group
              const firstGroup = mockDetailMeeting.maps_config[0].groupName || 'General';
              setExpandedMapGroups({ [firstGroup]: true });
         }
         setLoading(false);
+        // Pre-fill mock
+        if (session) {
+             setRegForm({ fullName: 'Demo User', email: session.user.email || '', phone: '', forumName: '', carType: 'R56' });
+        }
         return;
     }
 
     const fetchMeeting = async () => {
       if (!id) return;
+      
+      // 1. Fetch Meeting Details
       const { data, error } = await supabase
         .from('meetings')
         .select('*')
@@ -128,10 +141,72 @@ const EventDetails: React.FC = () => {
         }
       }
       setLoading(false);
+
+      // 2. Check Registration Status
+      if (session?.user) {
+          const { data: regData } = await supabase
+            .from('registrations')
+            .select('id')
+            .eq('meeting_id', id)
+            .eq('user_id', session.user.id)
+            .maybeSingle();
+          
+          if (regData) setIsRegistered(true);
+
+          // 3. Pre-fill form
+          if (!regData) {
+               // Try to fetch profile for defaults
+               const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+               setRegForm({
+                   fullName: profile?.full_name || '',
+                   email: session.user.email || '',
+                   phone: '',
+                   forumName: profile?.username || '',
+                   carType: profile?.car_model || ''
+               });
+          }
+      }
     };
 
     fetchMeeting();
-  }, [id]);
+  }, [id, session]);
+
+  const handleRegister = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setRegStatus('submitting');
+
+      if (!meeting) return;
+      if (isDemoMode) {
+          setTimeout(() => {
+              setRegStatus('success');
+              setIsRegistered(true);
+              setTimeout(() => { setShowRegisterModal(false); setRegStatus('idle'); }, 2000);
+          }, 1000);
+          return;
+      }
+
+      const payload = {
+          meeting_id: meeting.id,
+          user_id: session?.user?.id || null,
+          full_name: regForm.fullName,
+          email: regForm.email,
+          phone: regForm.phone,
+          forum_name: regForm.forumName,
+          car_type: regForm.carType,
+          status: 'pending' // Default status
+      };
+
+      const { error } = await supabase.from('registrations').insert([payload]);
+
+      if (error) {
+          console.error(error);
+          setRegStatus('error');
+      } else {
+          setRegStatus('success');
+          setIsRegistered(true);
+          setTimeout(() => { setShowRegisterModal(false); setRegStatus('idle'); }, 2000);
+      }
+  };
 
   const groupedMaps = useMemo(() => {
       const groups: Record<string, MapConfig[]> = {};
@@ -177,23 +252,39 @@ const EventDetails: React.FC = () => {
                     >
                         {meeting.title}
                     </motion.h1>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 text-white/90 text-sm md:text-base font-medium">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 text-white/90 text-sm md:text-base font-medium mb-6">
                         <span className="flex items-center gap-2">
                             <Calendar size={18} className="text-mini-red" /> 
                             {format(new Date(meeting.date), 'MMM do', {locale: dateLocale})} 
                             {meeting.end_date && ` - ${format(new Date(meeting.end_date), 'MMM do, yyyy', {locale: dateLocale})}`}
                         </span>
                         <span className="flex items-center gap-2"><MapPin size={18} className="text-mini-red" /> {meeting.location_name}</span>
-                        
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                        {/* Registration Button / Status */}
+                        {isRegistered ? (
+                            <div className="flex items-center gap-2 bg-green-500/20 border border-green-500 text-green-400 px-5 py-2.5 rounded-lg font-bold backdrop-blur-md">
+                                <CheckCircle size={18} /> {t('alreadyRegistered')}
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => setShowRegisterModal(true)}
+                                className="flex items-center gap-2 bg-mini-red text-white px-6 py-2.5 rounded-lg font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-900/50"
+                            >
+                                <UserPlus size={18} /> {t('registerForEvent')}
+                            </button>
+                        )}
+
                         {/* PDF Download Button */}
                         {meeting.pdf_url && (
                             <a 
                                 href={getAssetUrl(meeting.pdf_url)} 
                                 target="_blank" 
                                 rel="noreferrer"
-                                className="flex items-center gap-2 bg-mini-red text-white px-4 py-2 rounded-lg font-bold hover:bg-red-700 transition-colors shadow-lg w-fit"
+                                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2.5 rounded-lg font-bold transition-colors backdrop-blur-md"
                             >
-                                <Download size={18} /> {t('download')} PDF
+                                <Download size={18} /> PDF
                             </a>
                         )}
                     </div>
@@ -382,6 +473,115 @@ const EventDetails: React.FC = () => {
                 </motion.div>
             </div>
         </div>
+
+        {/* REGISTRATION MODAL */}
+        <Modal 
+            isOpen={showRegisterModal} 
+            onClose={() => { if(regStatus !== 'submitting') setShowRegisterModal(false); }}
+            title={t('joinEvent')}
+        >
+             <form onSubmit={handleRegister} className="space-y-4">
+                 {regStatus === 'success' ? (
+                     <div className="text-center py-8">
+                         <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                             <CheckCircle size={32} />
+                         </div>
+                         <h3 className="text-xl font-bold text-slate-900 dark:text-white">{t('registrationSuccess')}</h3>
+                         <p className="text-slate-500 mt-2">See you at the start line!</p>
+                     </div>
+                 ) : (
+                    <>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('fullName')}</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    required
+                                    value={regForm.fullName}
+                                    onChange={(e) => setRegForm({...regForm, fullName: e.target.value})}
+                                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red"
+                                    placeholder="Klas Ahlman"
+                                />
+                                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('email')}</label>
+                            <div className="relative">
+                                <input
+                                    type="email"
+                                    required
+                                    value={regForm.email}
+                                    onChange={(e) => setRegForm({...regForm, email: e.target.value})}
+                                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red"
+                                    placeholder="email@example.com"
+                                />
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('phone')}</label>
+                                <div className="relative">
+                                    <input
+                                        type="tel"
+                                        value={regForm.phone}
+                                        onChange={(e) => setRegForm({...regForm, phone: e.target.value})}
+                                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red"
+                                        placeholder="+46 70..."
+                                    />
+                                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('carType')}</label>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        value={regForm.carType}
+                                        onChange={(e) => setRegForm({...regForm, carType: e.target.value})}
+                                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red"
+                                        placeholder="JCW R53"
+                                    />
+                                    <Car className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t('forumName')} (Optional)</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={regForm.forumName}
+                                    onChange={(e) => setRegForm({...regForm, forumName: e.target.value})}
+                                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red"
+                                    placeholder="@username"
+                                />
+                                <MessageSquare className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            </div>
+                        </div>
+
+                        {regStatus === 'error' && (
+                             <div className="text-red-500 text-sm text-center bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">
+                                 {t('registrationError')}
+                             </div>
+                        )}
+
+                        <button 
+                            type="submit"
+                            disabled={regStatus === 'submitting'}
+                            className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                        >
+                            {regStatus === 'submitting' && <Loader2 className="animate-spin" size={20} />}
+                            {t('confirmRegistration')}
+                        </button>
+                    </>
+                 )}
+             </form>
+        </Modal>
 
         {/* Hotel Modal */}
         <Modal 
