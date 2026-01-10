@@ -128,8 +128,10 @@ const AdminDashboard: React.FC = () => {
           // 2. Check Scoped Client (Profile)
           setDiagLog(p => p + '2. Checking Profile (Scoped Client)...\n');
           if (session) {
+              // FIX: Disable persistence for diagnostic client to prevent conflicts
               const scopedClient = createClient(finalUrl, finalKey, {
-                  global: { headers: { Authorization: `Bearer ${session.access_token}` } }
+                  global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+                  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
               });
               
               const { data: profileData, error: profileError } = await scopedClient

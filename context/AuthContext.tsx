@@ -68,9 +68,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       console.log(`[Auth] Checking admin status for ${currentSession.user.email}...`);
       
-      // Create a timeout promise to prevent hanging forever
+      // Create a timeout promise (Increased to 20s for cold starts)
       const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Admin check timed out')), 10000)
+          setTimeout(() => reject(new Error('Admin check timed out (20s)')), 20000)
       );
 
       const checkLogic = async () => {
@@ -78,11 +78,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           let debugMsg = '';
 
           // CRITICAL: Create a scoped client with the specific access token.
+          // FIX: Disable auth persistence to avoid "Multiple GoTrueClient" warnings and storage conflicts.
           const scopedClient = createClient(finalUrl, finalKey, {
               global: {
                   headers: {
                       Authorization: `Bearer ${currentSession.access_token}`
                   }
+              },
+              auth: {
+                  persistSession: false, 
+                  autoRefreshToken: false,
+                  detectSessionInUrl: false
               }
           });
 
