@@ -7,12 +7,14 @@ interface AuthContextType {
   session: Session | null;
   isAdmin: boolean;
   loading: boolean;
+  authStatus: string; // New: Expose status for UI debugging
   signIn: (email: string) => Promise<void>;
   signInWithOAuth: (provider: Provider) => Promise<void>;
   signUp: (email: string, password: string, fullName: string, username: string) => Promise<{ error: any; data: any }>;
   sendPasswordReset: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
+  checkAdmin: (currentSession: Session) => Promise<void>; // Exposed for manual retry
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -21,10 +23,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [authStatus, setAuthStatus] = useState<string>('Initializing...');
 
   useEffect(() => {
     if (isDemoMode) {
       setLoading(false);
+      setAuthStatus('Demo Mode');
       return;
     }
 
@@ -35,6 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         checkAdmin(session);
       } else {
         setLoading(false);
+        setAuthStatus('No Session');
       }
     });
 
@@ -51,6 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
           setIsAdmin(false);
           setLoading(false);
+          setAuthStatus('Signed Out');
       }
     });
 
@@ -58,6 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const checkAdmin = async (currentSession: Session) => {
+    setAuthStatus('Checking Admin Role...');
     try {
       console.log(`[Auth] Checking admin status for ${currentSession.user.email}...`);
       
@@ -68,10 +75,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const checkLogic = async () => {
           let adminStatus = false;
+          let debugMsg = '';
 
           // CRITICAL: Create a scoped client with the specific access token.
-          // This ensures the request is definitely authenticated with the current user,
-          // bypassing any global client race conditions.
           const scopedClient = createClient(finalUrl, finalKey, {
               global: {
                   headers: {
@@ -89,52 +95,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (profile) {
               console.log(`[Auth] Profile role found: ${profile.role}`);
+              debugMsg += `Profile Role: ${profile.role}. `;
               const role = (profile.role || '').toLowerCase().trim();
               if (role === 'admin' || role === 'board') {
                   adminStatus = true;
               }
           } else if (profileError) {
               console.warn("[Auth] Profile fetch error:", profileError.message);
+              debugMsg += `Profile Error: ${profileError.message}. `;
+          } else {
+              debugMsg += `Profile not found. `;
           }
 
           // 2. FALLBACK: Try RPC if profile check was inconclusive or failed
           if (!adminStatus) {
-            // Use scoped client for RPC as well
             const { data: rpcIsAdmin, error: rpcError } = await scopedClient.rpc('is_admin');
             if (!rpcError && rpcIsAdmin === true) {
                 console.log("[Auth] RPC 'is_admin' returned true");
                 adminStatus = true;
+                debugMsg += `RPC: True. `;
             } else if (rpcError) {
-                console.warn("[Auth] RPC error:", rpcError.message);
+                debugMsg += `RPC Error: ${rpcError.message}. `;
+            } else {
+                debugMsg += `RPC: False. `;
             }
           }
 
-          // 3. LEGACY FALLBACK: Check 'user_roles' table
-          if (!adminStatus) {
-            const { data: roleData } = await scopedClient
-                .from('user_roles')
-                .select('role')
-                .eq('user_id', currentSession.user.id)
-                .single();
-            
-            if (roleData?.role === 'admin' || roleData?.role === 'board') {
-                console.log("[Auth] Legacy 'user_roles' found admin");
-                adminStatus = true;
-            }
-          }
-          return adminStatus;
+          return { adminStatus, debugMsg };
       };
 
       // Race the check against the timeout
-      const result = await Promise.race([checkLogic(), timeoutPromise]);
+      const result: any = await Promise.race([checkLogic(), timeoutPromise]);
       
-      console.log(`[Auth] Final Admin Status: ${result}`);
-      setIsAdmin(result as boolean);
+      console.log(`[Auth] Final Admin Status: ${result.adminStatus}`);
+      setIsAdmin(result.adminStatus as boolean);
+      setAuthStatus(result.adminStatus ? 'Access Granted' : `Access Denied. ${result.debugMsg}`);
 
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error checking admin status (or timeout):", e);
-      // Default to false on error/timeout so user can at least see the UI
       setIsAdmin(false);
+      setAuthStatus(`Error: ${e.message || 'Unknown Check Error'}`);
     } finally {
       setLoading(false);
     }
@@ -145,6 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(null);
     setIsAdmin(false);
     setLoading(false);
+    setAuthStatus('Signed Out');
 
     if (isDemoMode) return;
 
@@ -230,12 +231,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     session,
     isAdmin,
     loading,
+    authStatus,
     signIn,
     signInWithOAuth,
     signUp,
     sendPasswordReset,
     updatePassword,
     signOut,
+    checkAdmin
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

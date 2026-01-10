@@ -4,13 +4,14 @@ import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Bug } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, ToggleLeft, ToggleRight, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, AlertCircle, Mail, UserCog, HelpCircle, X, Trash2, Image, LogOut, Bug, RefreshCw } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, LinkItem } from '../types';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
+import { createClient } from '@supabase/supabase-js';
 
 const AdminDashboard: React.FC = () => {
-  const { isAdmin, loading, session, signOut, updatePassword, sendPasswordReset } = useAuth();
+  const { isAdmin, loading, session, signOut, updatePassword, sendPasswordReset, authStatus, checkAdmin } = useAuth();
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings'>('overview');
   
@@ -33,13 +34,8 @@ const AdminDashboard: React.FC = () => {
   const [isEditingEvent, setIsEditingEvent] = useState(false);
   const [editingEventData, setEditingEventData] = useState<Partial<Meeting>>({});
 
-  // Global Settings Mock
-  const [globalSettings, setGlobalSettings] = useState({
-      maintenanceMode: false,
-      publicRegistration: true,
-      defaultContactEmail: 'contact@nmcs.club',
-      yearlyTheme: 'JCW Racing Spirit'
-  });
+  // Debug State
+  const [diagLog, setDiagLog] = useState<string>('');
 
   // --- DATA LOADING ---
   useEffect(() => {
@@ -118,6 +114,49 @@ const AdminDashboard: React.FC = () => {
     }
   }, [activeTab, isAdmin]);
 
+  // DIAGNOSTICS HANDLER
+  const runDiagnostics = async () => {
+      setDiagLog('Starting Diagnostics...\n');
+      
+      try {
+          // 1. Check Global Client
+          setDiagLog(p => p + '1. Checking Global Client (Public Table)...\n');
+          const { data: globalData, error: globalError } = await supabase.from('connection_tests').select('id').limit(1);
+          if (globalError) setDiagLog(p => p + `❌ Global Client Error: ${globalError.message}\n`);
+          else setDiagLog(p => p + `✅ Global Client Connected. Rows: ${globalData?.length}\n`);
+
+          // 2. Check Scoped Client (Profile)
+          setDiagLog(p => p + '2. Checking Profile (Scoped Client)...\n');
+          if (session) {
+              const scopedClient = createClient(finalUrl, finalKey, {
+                  global: { headers: { Authorization: `Bearer ${session.access_token}` } }
+              });
+              
+              const { data: profileData, error: profileError } = await scopedClient
+                  .from('profiles')
+                  .select('*')
+                  .eq('id', session.user.id)
+                  .single();
+
+              if (profileError) {
+                  setDiagLog(p => p + `❌ Profile Fetch Error: ${profileError.message}\n`);
+              } else {
+                  setDiagLog(p => p + `✅ Profile Found!\nRole: "${profileData.role}"\nEmail: ${profileData.email}\n`);
+                  if (profileData.role === 'admin' || profileData.role === 'board') {
+                       setDiagLog(p => p + `✅ Role is valid for Admin Access.\n`);
+                  } else {
+                       setDiagLog(p => p + `❌ Role '${profileData.role}' is NOT 'admin' or 'board'. Access denied.\n`);
+                  }
+              }
+          } else {
+              setDiagLog(p => p + '❌ No Session found.\n');
+          }
+
+      } catch (err: any) {
+          setDiagLog(p => p + `💥 CRITICAL ERROR: ${err.message}\n`);
+      }
+  };
+
 
   if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
   
@@ -147,21 +186,24 @@ const AdminDashboard: React.FC = () => {
                         <Bug size={14} /> Debug Information
                     </h4>
                     <div className="space-y-1 font-mono text-xs text-slate-700 dark:text-slate-300 break-all">
-                        <p><strong>Your User ID:</strong> {session.user.id}</p>
+                        <p><strong>Status:</strong> <span className={authStatus.includes('Granted') ? "text-green-600 font-bold" : "text-red-500 font-bold"}>{authStatus}</span></p>
+                        <p><strong>User ID:</strong> {session.user.id}</p>
                         <p><strong>Email:</strong> {session.user.email}</p>
-                        <div className="pt-2">
+                        
+                        <div className="pt-3 pb-3">
                             <button 
-                                onClick={async () => {
-                                    alert("Fetching your profile from DB...");
-                                    const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-                                    if(error) alert("Error fetching profile: " + error.message);
-                                    else alert("Profile Data:\n" + JSON.stringify(data, null, 2));
-                                }}
-                                className="text-mini-red hover:underline font-bold"
+                                onClick={runDiagnostics}
+                                className="flex items-center gap-2 text-white bg-slate-500 hover:bg-slate-600 px-3 py-1 rounded text-xs font-bold transition-colors"
                             >
-                                Run Diagnostics Check
+                                <RefreshCw size={10} /> Run Diagnostics Check
                             </button>
                         </div>
+                        
+                        {diagLog && (
+                            <div className="p-3 bg-black text-green-400 rounded-lg text-[10px] whitespace-pre-wrap max-h-40 overflow-y-auto border border-slate-700">
+                                {diagLog}
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -181,7 +223,7 @@ const AdminDashboard: React.FC = () => {
                 
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                     <button 
-                        onClick={() => window.location.reload()}
+                        onClick={() => checkAdmin(session)}
                         className="px-6 py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity shadow-lg"
                     >
                         Check Access Again

@@ -40,13 +40,6 @@ if (isMissingKeys) {
         '%c[NMCS Warning] Supabase keys are missing!', 
         'color: orange; font-weight: bold; font-size: 14px; background: #333; padding: 4px;'
     );
-    console.warn(
-        'TROUBLESHOOTING FOR COOLIFY/DOCKER:\n' +
-        '1. "Invisible Variable Bug": Vite ignores env vars unless they start with "VITE_".\n' +
-        '   - Rename SUPABASE_URL -> VITE_SUPABASE_URL\n' +
-        '   - Rename SUPABASE_KEY -> VITE_SUPABASE_ANON_KEY\n' +
-        '2. "Build Time Injection": In Docker, you might need to redeploy after setting vars.\n'
-    );
 }
 
 // Fallback for Demo Mode if keys are missing
@@ -56,32 +49,13 @@ export const isDemoMode = isMissingKeys || supabaseUrl.includes('placeholder');
 export const finalUrl = isDemoMode ? 'https://placeholder.supabase.co' : supabaseUrl;
 export const finalKey = isDemoMode ? 'placeholder' : supabaseAnonKey;
 
-// Create client with specific configuration for connection stability
+// Create client with standard configuration
+// Removed custom fetch wrapper to avoid hanging request issues
 export const supabase = createClient(finalUrl, finalKey, {
     auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true
-    },
-    // Retry configuration for flaky connections (Cold Starts)
-    global: {
-        fetch: (url, options) => {
-            // Use AbortController for broader compatibility than AbortSignal.timeout
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
-
-            return fetch(url, {
-                ...options,
-                signal: controller.signal
-            }).then(response => {
-                clearTimeout(timeoutId);
-                return response;
-            }).catch(err => {
-                clearTimeout(timeoutId);
-                console.error("Supabase Fetch Error:", err);
-                throw err;
-            });
-        }
     }
 });
 
