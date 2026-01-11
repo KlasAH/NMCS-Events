@@ -12,6 +12,7 @@ import { createClient } from '@supabase/supabase-js';
 import { format } from 'date-fns';
 import Modal from '../components/Modal';
 import QRCode from 'react-qr-code';
+import QrCodeStudio from '../components/QrCodeStudio';
 
 const MASTER_ADMIN_EMAIL = 'klas.ahlman@gmail.com';
 
@@ -47,7 +48,7 @@ const AdminDashboard: React.FC = () => {
   const { t } = useLanguage();
   
   // 2. STATE HOOKS
-  const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings' | 'qr-tools'>('overview');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Data State
@@ -78,7 +79,6 @@ const AdminDashboard: React.FC = () => {
 
   // Editing State (Events)
   const [isEditingEvent, setIsEditingEvent] = useState(false);
-  // Removed 'extra' from the tab type definition as it's merged into itinerary
   const [editorTab, setEditorTab] = useState<'general' | 'itinerary' | 'hotels' | 'parking' | 'maps' | 'preview'>('general');
   const [editingEventData, setEditingEventData] = useState<Partial<Meeting>>({});
   const [editingItinerary, setEditingItinerary] = useState<ItineraryItem[]>([]);
@@ -88,15 +88,8 @@ const AdminDashboard: React.FC = () => {
   // Parking App Custom Input State
   const [customAppName, setCustomAppName] = useState('');
 
-  // QR Studio State
-  const [qrStudio, setQrStudio] = useState({
-      url: 'https://nmcs.se',
-      fgColor: '#000000',
-      bgColor: '#ffffff',
-      logoUrl: '',
-      bgImageUrl: '',
-      shape: 'square' as 'square' | 'rounded' | 'circle'
-  });
+  // QR Studio - Auto Load Url
+  const [studioUrl, setStudioUrl] = useState('');
 
   // 3. MEMO HOOKS (Must be before any return)
   const financialStats = useMemo(() => {
@@ -256,6 +249,7 @@ const AdminDashboard: React.FC = () => {
   const startEditEvent = async (evt?: Meeting) => {
       setEditorTab('general');
       setSaveStatus('');
+      setStudioUrl(''); // Reset QR Studio when opening editor
       if(evt) {
           const eventData = JSON.parse(JSON.stringify(evt));
           // Normalize arrays
@@ -409,44 +403,32 @@ const AdminDashboard: React.FC = () => {
     if (publish) setIsEditingEvent(false);
   }
 
-  // --- QR DOWNLOAD ---
-  const downloadQr = () => {
-      const svg = document.getElementById("qr-code-studio");
-      if(svg) {
-          const svgData = new XMLSerializer().serializeToString(svg);
-          const canvas = document.createElement("canvas");
-          const ctx = canvas.getContext("2d");
-          const img = new window.Image();
-          img.onload = () => {
-              canvas.width = img.width;
-              canvas.height = img.height;
-              if (ctx) {
-                  // Fill white background first if transparency issues
-                  ctx.fillStyle = "white";
-                  ctx.fillRect(0,0, canvas.width, canvas.height);
-                  if (qrStudio.bgImageUrl) {
-                      // Draw background image logic complex here without CORS...
-                      // Skipping bg image draw on canvas for simplicity in this constraints
-                  }
-                  ctx.drawImage(img, 0, 0);
-              }
-              const a = document.createElement("a");
-              a.download = "nmcs-qr.png";
-              a.href = canvas.toDataURL("image/png");
-              a.click();
-          };
-          img.src = "data:image/svg+xml;base64," + btoa(svgData);
-      }
-  }
+  // --- COLLECT URL RESOURCES FOR EDITOR ---
+  const collectEventResources = () => {
+      const resources: { label: string, url: string, type: string }[] = [];
+      
+      // Maps Config
+      (editingEventData.maps_config || []).forEach(m => {
+          if(m.url) resources.push({ label: m.label || 'Map', url: m.url, type: 'Map' });
+      });
 
-  // Determine container style based on shape
-  const getQrContainerStyle = () => {
-      switch(qrStudio.shape) {
-          case 'circle': return 'rounded-full overflow-hidden border-4 border-white';
-          case 'rounded': return 'rounded-3xl overflow-hidden border-4 border-white';
-          case 'square': default: return 'rounded-none border-4 border-white';
-      }
-  }
+      // Hotels
+      (editingEventData.hotel_info as HotelDetails[] || []).forEach(h => {
+          if(h.map_url) resources.push({ label: h.name + ' Map', url: h.map_url, type: 'Hotel' });
+      });
+
+      // Parking
+      (editingEventData.parking_info as ParkingDetails[] || []).forEach(p => {
+          if(p.map_url) resources.push({ label: p.location + ' Map', url: p.map_url, type: 'Parking' });
+      });
+
+      // Itinerary
+      editingItinerary.forEach(i => {
+          if(i.location_map_url) resources.push({ label: i.title + ' Location', url: i.location_map_url, type: 'Itinerary' });
+      });
+
+      return resources;
+  };
 
   return (
     <div className="pt-24 pb-12 px-4 max-w-7xl mx-auto min-h-screen">
@@ -473,6 +455,7 @@ const AdminDashboard: React.FC = () => {
                     { id: 'overview', label: 'Events Overview', icon: Star },
                     { id: 'registrations', label: 'Registrations', icon: Users },
                     { id: 'finances', label: 'Financials', icon: DollarSign },
+                    { id: 'qr-tools', label: 'Maps & QR', icon: QrCode },
                     { id: 'settings', label: 'Settings', icon: Settings },
                 ].map((tab) => (
                     <button
@@ -664,21 +647,20 @@ const AdminDashboard: React.FC = () => {
                             {/* LIST EXISTING MAPS */}
                             <div className="space-y-6">
                                 <div className="flex justify-between items-center">
-                                    <h3 className="font-bold">Map Links & QR Codes</h3>
+                                    <h3 className="font-bold">Custom Maps</h3>
                                     <button onClick={() => addToList('maps_config', { groupName: 'General', label: 'Route Map', url: '' })} className={`${BUTTON_STYLE} bg-mini-black dark:bg-white text-white dark:text-black`}>+ Add Map</button>
                                 </div>
                                 
                                 {(editingEventData.maps_config || []).map((map, idx) => (
-                                    <div key={idx} className="border border-slate-200 dark:border-slate-700 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 flex gap-6">
+                                    <div key={idx} className="border border-slate-200 dark:border-slate-700 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 flex gap-6 items-center">
                                         <div className="space-y-3 flex-grow">
                                             <input value={map.groupName} onChange={e => updateList('maps_config', idx, 'groupName', e.target.value)} placeholder="Group (e.g. Day 1)" className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
                                             <input value={map.label} onChange={e => updateList('maps_config', idx, 'label', e.target.value)} placeholder="Label (e.g. Morning Route)" className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
                                             <input value={map.url} onChange={e => updateList('maps_config', idx, 'url', e.target.value)} placeholder="Google Maps URL" className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
                                         </div>
-                                        <div className="shrink-0 flex flex-col items-center justify-center bg-white dark:bg-slate-900 p-2 rounded-lg shadow-sm border dark:border-slate-700 w-32">
-                                            {map.url ? <QRCode value={map.url} size={80} className="dark:bg-white dark:p-1 dark:rounded" /> : <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs text-slate-400">No URL</div>}
-                                            <span className="text-[10px] mt-1 text-slate-400">Preview</span>
-                                        </div>
+                                        <button onClick={() => setStudioUrl(map.url)} className="p-3 bg-slate-100 dark:bg-slate-700 rounded-lg text-xs font-bold whitespace-nowrap hover:bg-mini-red hover:text-white transition-colors">
+                                            Customize QR
+                                        </button>
                                         <button onClick={() => removeFromList('maps_config', idx)} className="text-red-500 self-start"><X size={20}/></button>
                                     </div>
                                 ))}
@@ -686,142 +668,32 @@ const AdminDashboard: React.FC = () => {
 
                             <hr className="border-slate-100 dark:border-slate-800" />
 
-                            {/* QR CODE STUDIO */}
-                            <div className="bg-slate-50 dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><QrCode size={20} /> QR Code Studio</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className={LABEL_STYLE}>Content (URL)</label>
-                                            <input 
-                                                value={qrStudio.url} 
-                                                onChange={e => setQrStudio({...qrStudio, url: e.target.value})} 
-                                                className={INPUT_STYLE} 
-                                                placeholder="https://..."
-                                            />
-                                        </div>
-                                        
-                                        <div>
-                                            <label className={LABEL_STYLE}>Shape Style</label>
-                                            <div className="flex gap-2">
-                                                <button 
-                                                    onClick={() => setQrStudio(p => ({...p, shape: 'square'}))}
-                                                    className={`flex-1 p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${qrStudio.shape === 'square' ? 'bg-mini-black text-white border-mini-black' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}
-                                                >
-                                                    <Square size={20} /> <span className="text-xs font-bold">Square</span>
-                                                </button>
-                                                <button 
-                                                    onClick={() => setQrStudio(p => ({...p, shape: 'rounded'}))}
-                                                    className={`flex-1 p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${qrStudio.shape === 'rounded' ? 'bg-mini-black text-white border-mini-black' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}
-                                                >
-                                                    <div className="w-5 h-5 rounded border-2 border-current"></div> <span className="text-xs font-bold">Rounded</span>
-                                                </button>
-                                                <button 
-                                                    onClick={() => setQrStudio(p => ({...p, shape: 'circle'}))}
-                                                    className={`flex-1 p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${qrStudio.shape === 'circle' ? 'bg-mini-black text-white border-mini-black' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'}`}
-                                                >
-                                                    <Circle size={20} /> <span className="text-xs font-bold">Circle</span>
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className={LABEL_STYLE}>Foreground</label>
-                                                <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-700">
-                                                    <input 
-                                                        type="color" 
-                                                        value={qrStudio.fgColor} 
-                                                        onChange={e => setQrStudio({...qrStudio, fgColor: e.target.value})}
-                                                        className="w-8 h-8 rounded cursor-pointer border-0 p-0"
-                                                    />
-                                                    <span className="text-xs font-mono">{qrStudio.fgColor}</span>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className={LABEL_STYLE}>Background</label>
-                                                <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-700">
-                                                    <input 
-                                                        type="color" 
-                                                        value={qrStudio.bgColor} 
-                                                        onChange={e => setQrStudio({...qrStudio, bgColor: e.target.value})}
-                                                        className="w-8 h-8 rounded cursor-pointer border-0 p-0"
-                                                    />
-                                                    <span className="text-xs font-mono">{qrStudio.bgColor}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <label className={LABEL_STYLE}>Center Logo</label>
-                                            <div className="flex items-center gap-2">
-                                                <label className="flex-grow cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold hover:bg-slate-50">
-                                                    <ImageIcon size={16} /> Upload Logo
-                                                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => setQrStudio({...qrStudio, logoUrl: url}))} />
-                                                </label>
-                                                {qrStudio.logoUrl && (
-                                                    <div className="w-12 h-12 relative group">
-                                                        <img src={qrStudio.logoUrl} className="w-full h-full object-contain rounded border bg-white" />
-                                                        <button onClick={() => setQrStudio({...qrStudio, logoUrl: ''})} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={10}/></button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <label className={LABEL_STYLE}>Background Image (Behind QR)</label>
-                                            <div className="flex items-center gap-2">
-                                                <label className="flex-grow cursor-pointer bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold hover:bg-slate-50">
-                                                    <Image size={16} /> Upload Background
-                                                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => setQrStudio({...qrStudio, bgImageUrl: url}))} />
-                                                </label>
-                                                {qrStudio.bgImageUrl && (
-                                                    <div className="w-12 h-12 relative group">
-                                                        <img src={qrStudio.bgImageUrl} className="w-full h-full object-cover rounded border" />
-                                                        <button onClick={() => setQrStudio({...qrStudio, bgImageUrl: ''})} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={10}/></button>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* PREVIEW */}
-                                    <div className="flex flex-col items-center justify-center bg-slate-200 dark:bg-slate-900 p-8 rounded-xl border border-slate-300 dark:border-slate-600 relative overflow-hidden">
-                                        <div 
-                                            id="qr-preview-container"
-                                            className={`relative p-4 shadow-lg ${getQrContainerStyle()}`}
-                                            style={{
-                                                backgroundImage: qrStudio.bgImageUrl ? `url(${qrStudio.bgImageUrl})` : 'none',
-                                                backgroundSize: 'cover',
-                                                backgroundPosition: 'center',
-                                                backgroundColor: qrStudio.bgImageUrl ? 'transparent' : qrStudio.bgColor
-                                            }}
+                            {/* AUTO-GENERATED RESOURCES */}
+                            <div>
+                                <h3 className="font-bold mb-4">Linked Resources (from other tabs)</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {collectEventResources().map((res, i) => (
+                                        <button 
+                                            key={i}
+                                            onClick={() => setStudioUrl(res.url)}
+                                            className="text-left p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:border-mini-red transition-all group"
                                         >
-                                            <div style={{ position: 'relative', width: 200, height: 200 }}>
-                                                <QRCode 
-                                                    id="qr-code-studio"
-                                                    value={qrStudio.url} 
-                                                    size={200}
-                                                    fgColor={qrStudio.fgColor}
-                                                    bgColor={qrStudio.bgImageUrl ? 'transparent' : qrStudio.bgColor}
-                                                    style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                                />
-                                                {qrStudio.logoUrl && (
-                                                    <div className="absolute inset-0 flex items-center justify-center">
-                                                        <div className="bg-white p-1 rounded-full shadow-md w-[50px] h-[50px] flex items-center justify-center overflow-hidden">
-                                                            <img src={qrStudio.logoUrl} className="w-full h-full object-contain" />
-                                                        </div>
-                                                    </div>
-                                                )}
+                                            <div className="text-xs font-bold text-slate-400 uppercase">{res.type}</div>
+                                            <div className="font-bold text-slate-900 dark:text-white truncate">{res.label}</div>
+                                            <div className="text-xs text-blue-500 mt-1 truncate">{res.url}</div>
+                                            <div className="mt-2 text-xs font-bold text-mini-red opacity-0 group-hover:opacity-100 transition-opacity">
+                                                Click to Customize QR →
                                             </div>
-                                        </div>
-                                        {/* Download not fully implemented due to complexities with SVG to Canvas + CORS images in this sandbox, but button is there for UX completeness */}
-                                        <button className="mt-6 text-sm font-bold text-slate-500 flex items-center gap-2 hover:text-mini-black" title="Right click image to save">
-                                            <Download size={16} /> Right click to Save
                                         </button>
-                                    </div>
+                                    ))}
+                                    {collectEventResources().length === 0 && <p className="text-slate-400 italic text-sm">No linked resources found (Hotels, Parking, etc).</p>}
                                 </div>
                             </div>
+
+                            <hr className="border-slate-100 dark:border-slate-800" />
+
+                            {/* QR CODE STUDIO */}
+                            <QrCodeStudio initialUrl={studioUrl} />
                          </div>
                     )}
 
@@ -1134,8 +1006,17 @@ const AdminDashboard: React.FC = () => {
                             )}
                         </div>
                     )}
+
+                    {/* 4. QR TOOLS TAB (RENAMED) */}
+                    {activeTab === 'qr-tools' && (
+                        <div className="space-y-6 animate-in fade-in">
+                            <h2 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">Maps & QR (General)</h2>
+                            <p className="text-slate-500 mb-6">Create high-quality QR codes for general use (e.g., Club Website, PDFs, Promo links). For event-specific items, use the Event Editor.</p>
+                            <QrCodeStudio />
+                        </div>
+                    )}
                     
-                    {/* 4. SETTINGS TAB */}
+                    {/* 5. SETTINGS TAB */}
                     {activeTab === 'settings' && (
                         <div className="space-y-8">
                             <h2 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">Settings & Users</h2>
