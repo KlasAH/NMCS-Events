@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -13,11 +14,8 @@ interface SupabaseTesterProps {
 
 const FIX_SQL = `
 -- 1. CLEANUP: PREVENT DEPENDENCY ERRORS (2BP01)
--- Explicitly drop old policies that depend on is_board() BEFORE dropping the function
 DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations;
 DROP POLICY IF EXISTS "Board sees finances" ON public.transactions;
-
--- Now it is safe to drop the function
 DROP FUNCTION IF EXISTS public.is_board() CASCADE;
 
 -- 2. FIX: Security Warning "Mutable Search Path"
@@ -58,22 +56,19 @@ BEGIN
 END;
 $$;
 
--- 3. FIX: Enable Full CRUD for Tester & Resolve "Always True" Warning
+-- 3. FIX: Enable Full CRUD for Tester
 CREATE TABLE IF NOT EXISTS public.connection_tests (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   message TEXT,
   response_data TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
-
 ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can update tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can delete tests" ON public.connection_tests;
-
 CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT TO anon, authenticated WITH CHECK (auth.role() IN ('anon', 'authenticated'));
 CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT TO anon, authenticated USING (auth.role() IN ('anon', 'authenticated'));
 CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE TO anon, authenticated USING (auth.role() IN ('anon', 'authenticated'));
@@ -104,6 +99,9 @@ CREATE POLICY "Public/Auth can read settings" ON public.app_settings FOR SELECT 
 
 -- 7. FEATURE: Board Role Column
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
+
+-- 8. FEATURE: Publish Status
+ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('draft', 'published')) DEFAULT 'draft';
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
@@ -453,7 +451,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return;
         }
 
-        // Create a fresh client to bypass global auth issues
         const client = getFreshClient();
         if (!client) {
             addLog('ERROR: Could not create Supabase client (Missing Env Vars?)');
@@ -465,7 +462,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         
         if (error) {
             addLog(`Delete Failed: ${error.message}`);
-            if (error.message.includes('policy')) addLog('Hint: Run the SQL Fix below to enable Deletes.');
         } else {
             addLog('Delete successful.');
             fetchLatestRows(client);
@@ -480,7 +476,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return;
         }
 
-        // Create a fresh client to bypass global auth issues
         const client = getFreshClient();
         if (!client) {
             addLog('ERROR: Could not create Supabase client (Missing Env Vars?)');
@@ -492,7 +487,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         
         if (error) {
             addLog(`Update Failed: ${error.message}`);
-            if (error.message.includes('policy')) addLog('Hint: Run the SQL Fix below to enable Updates.');
         } else {
             addLog('Update successful.');
             setEditingId(null);
@@ -510,10 +504,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     </p>
                     <ul className="list-disc ml-4 space-y-1 text-xs">
                         <li><strong>Fixed Dependency Error (2BP01):</strong> SQL now explicitly drops old "Board" policies before dropping functions.</li>
-                        <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks <code>auth.role() IN (...)</code> to satisfy security linter.</li>
+                        <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks.</li>
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
-                        <li><strong>NEW: App Settings:</strong> Added table for configurable auto-logout timer.</li>
-                        <li><strong>NEW: Board Role:</strong> Added board_role column to profiles.</li>
+                        <li><strong>NEW: Publish Status:</strong> Added 'status' column to meetings table.</li>
                     </ul>
                 </div>
 

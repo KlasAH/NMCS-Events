@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
 import { Meeting } from '../types';
@@ -9,6 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 // @ts-ignore
 import { useNavigate } from 'react-router-dom';
 import SupabaseTester from '../components/SupabaseTester';
+import { useAuth } from '../context/AuthContext';
 
 const mockMeetings: Meeting[] = [
     {
@@ -19,7 +21,8 @@ const mockMeetings: Meeting[] = [
         location_name: 'Swiss Alps, Zurich Start',
         description: 'Our annual flagship event traversing the most scenic passes in the Alps. Prepare for 3 days of spirited driving, luxury accommodation, and fine dining. Limited to 30 cars.',
         cover_image_url: 'https://picsum.photos/seed/alpine/800/600',
-        is_pinned: true
+        is_pinned: true,
+        status: 'published'
     },
     {
         id: '2',
@@ -29,27 +32,8 @@ const mockMeetings: Meeting[] = [
         location_name: 'Blue Bottle, Downtown',
         description: 'Casual meet and greet for new members. Coffee is on the club.',
         cover_image_url: 'https://picsum.photos/seed/coffee/800/600',
-        is_pinned: false
-    },
-    {
-        id: '3',
-        created_at: new Date().toISOString(),
-        title: 'Track Day: Silverstone',
-        date: '2024-05-10',
-        location_name: 'Silverstone Circuit, UK',
-        description: 'Open pit lane format. Instructors available. Noise limit 102dB.',
-        cover_image_url: 'https://picsum.photos/seed/track/800/600',
-        is_pinned: false
-    },
-    {
-        id: '4',
-        created_at: new Date().toISOString(),
-        title: 'Coastal Cruise',
-        date: '2024-07-08',
-        location_name: 'Pacific Highway',
-        description: 'A relaxed drive along the coast followed by a seafood lunch.',
-        cover_image_url: 'https://picsum.photos/seed/coast/800/600',
-        is_pinned: false
+        is_pinned: false,
+        status: 'published'
     }
 ];
 
@@ -61,6 +45,7 @@ const Home: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');
   const { currentTheme } = useTheme();
+  const { isAdmin } = useAuth();
   
   // Secret Login Logic
   const [secretClicks, setSecretClicks] = useState(0);
@@ -82,10 +67,14 @@ const Home: React.FC = () => {
     }
 
     const fetchMeetings = async () => {
-      const { data, error } = await supabase
-        .from('meetings')
-        .select('*')
-        .order('date', { ascending: false }); // Fetch latest dates first as base
+      let query = supabase.from('meetings').select('*');
+      
+      // If not admin, only show published. 
+      // NOTE: For now, we will filter by published status for everyone on the Home page to keep it clean.
+      // Admins view drafts in the dashboard.
+      query = query.eq('status', 'published');
+      
+      const { data, error } = await query.order('date', { ascending: false });
       
       if (!error && data) {
         setMeetings(data);

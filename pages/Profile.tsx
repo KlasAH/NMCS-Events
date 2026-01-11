@@ -5,9 +5,10 @@ import { supabase, isDemoMode } from '../lib/supabase';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle } from 'lucide-react';
+import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle, X } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
+import Modal from '../components/Modal';
 
 const BOARD_ROLES = [
     'Ordförande',
@@ -25,7 +26,7 @@ const Profile: React.FC = () => {
     const [profile, setProfile] = useState<any>(null);
     const [boardRole, setBoardRole] = useState('');
     const [saving, setSaving] = useState(false);
-    const [statusMsg, setStatusMsg] = useState('');
+    const [showSaveModal, setShowSaveModal] = useState(false);
 
     // Password State
     const [newPassword, setNewPassword] = useState('');
@@ -46,12 +47,11 @@ const Profile: React.FC = () => {
 
     const handleSaveProfile = async () => {
         setSaving(true);
-        setStatusMsg('');
         
         if (isDemoMode) {
             setTimeout(() => {
                 setSaving(false);
-                setStatusMsg(t('save') + '!');
+                setShowSaveModal(true);
             }, 1000);
             return;
         }
@@ -64,11 +64,10 @@ const Profile: React.FC = () => {
             })
             .eq('id', session?.user.id);
 
-        if (error) {
-            setStatusMsg('Error: ' + error.message);
+        if (!error) {
+            setShowSaveModal(true);
         } else {
-            setStatusMsg(t('save') + '!');
-            setTimeout(() => setStatusMsg(''), 3000);
+            alert('Error saving: ' + error.message);
         }
         setSaving(false);
     };
@@ -168,12 +167,6 @@ const Profile: React.FC = () => {
                                     {saving ? 'Saving...' : <><Save size={18} /> {t('save')}</>}
                                 </button>
                             </div>
-                            
-                            {statusMsg && (
-                                <div className="text-center text-green-600 font-bold bg-green-50 p-3 rounded-xl border border-green-100 animate-pulse">
-                                    {statusMsg}
-                                </div>
-                            )}
                         </div>
                     </div>
                     
@@ -241,6 +234,23 @@ const Profile: React.FC = () => {
                     </div>
                 </div>
             </motion.div>
+
+            {/* SAVE CONFIRMATION MODAL */}
+            <Modal isOpen={showSaveModal} onClose={() => setShowSaveModal(false)} title="">
+                <div className="text-center py-8">
+                    <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+                        <CheckCircle size={40} />
+                    </div>
+                    <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Profile Updated!</h3>
+                    <p className="text-slate-500 mb-6">Your changes have been successfully saved.</p>
+                    <button 
+                        onClick={() => setShowSaveModal(false)}
+                        className="bg-mini-black dark:bg-white text-white dark:text-black px-8 py-3 rounded-xl font-bold hover:opacity-90"
+                    >
+                        OK
+                    </button>
+                </div>
+            </Modal>
         </div>
     );
 };

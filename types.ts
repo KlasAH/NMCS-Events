@@ -1,4 +1,5 @@
 
+
 export type Json =
   | string
   | number
@@ -71,6 +72,7 @@ export interface Meeting {
   pdf_url?: string;
   maps_config?: MapConfig[]; 
   is_pinned?: boolean;
+  status?: 'draft' | 'published'; // Added status
   // Updated to allow arrays or legacy single object
   hotel_info?: HotelDetails | HotelDetails[]; 
   parking_info?: ParkingDetails | ParkingDetails[];

@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useMemo } from 'react';
 // @ts-ignore
 import { useParams, Link } from 'react-router-dom';
@@ -127,11 +128,37 @@ const EventDetails: React.FC = () => {
   }, [id, session]);
 
   const handleRegister = async (e: React.FormEvent) => {
-      // ... (Registration logic remains same)
       e.preventDefault();
       setRegStatus('submitting');
-      // ...
-      setTimeout(() => { setRegStatus('success'); setIsRegistered(true); setTimeout(() => setShowRegisterModal(false), 2000) }, 1000);
+      
+      if (isDemoMode) {
+          setTimeout(() => { setRegStatus('success'); setIsRegistered(true); setTimeout(() => setShowRegisterModal(false), 2000) }, 1000);
+          return;
+      }
+
+      if (!id) return;
+
+      const payload = {
+          meeting_id: id,
+          user_id: session?.user?.id || null, // Null for public users
+          full_name: regForm.fullName,
+          email: regForm.email,
+          forum_name: regForm.forumName,
+          phone: regForm.phone,
+          car_type: regForm.carType,
+          status: 'pending'
+      };
+
+      const { error } = await supabase.from('registrations').insert([payload]);
+
+      if (error) {
+          console.error("Registration error:", error);
+          setRegStatus('error');
+      } else {
+          setRegStatus('success');
+          setIsRegistered(true);
+          setTimeout(() => setShowRegisterModal(false), 2000);
+      }
   };
 
   const groupedMaps = useMemo(() => {
@@ -375,7 +402,6 @@ const EventDetails: React.FC = () => {
 
         {/* REGISTRATION MODAL */}
         <Modal isOpen={showRegisterModal} onClose={() => { if(regStatus !== 'submitting') setShowRegisterModal(false); }} title={t('joinEvent')}>
-             {/* ... (Kept existing form logic) ... */}
               <form onSubmit={handleRegister} className="space-y-4">
                  {regStatus === 'success' ? (
                      <div className="text-center py-8">
@@ -384,8 +410,26 @@ const EventDetails: React.FC = () => {
                      </div>
                  ) : (
                     <>
-                        <input type="text" required value={regForm.fullName} onChange={(e) => setRegForm({...regForm, fullName: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none" placeholder="Full Name" />
-                        <button type="submit" disabled={regStatus === 'submitting'} className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold">{t('confirmRegistration')}</button>
+                        <div>
+                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Full Name</label>
+                             <input type="text" required value={regForm.fullName} onChange={(e) => setRegForm({...regForm, fullName: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-mini-red" placeholder="Klas Ahlman" />
+                        </div>
+                        <div>
+                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email</label>
+                             <input type="email" required value={regForm.email} onChange={(e) => setRegForm({...regForm, email: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-mini-red" placeholder="klas@example.com" />
+                        </div>
+                        <div>
+                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Forum Name (Optional)</label>
+                             <input type="text" value={regForm.forumName} onChange={(e) => setRegForm({...regForm, forumName: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-mini-red" placeholder="@klas" />
+                        </div>
+                        <div>
+                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Car Model</label>
+                             <input type="text" value={regForm.carType} onChange={(e) => setRegForm({...regForm, carType: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 outline-none focus:border-mini-red" placeholder="R53, F56 JCW..." />
+                        </div>
+                        
+                        <button type="submit" disabled={regStatus === 'submitting'} className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:bg-slate-800 transition-colors mt-4">
+                            {regStatus === 'submitting' ? <Loader2 className="animate-spin mx-auto" /> : t('confirmRegistration')}
+                        </button>
                     </>
                  )}
              </form>

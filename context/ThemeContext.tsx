@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, getAssetUrl } from '../lib/supabase';
 
-export type MiniModel = 'r53' | 'r52' | 'r56' | 'r55' | 'f56' | 'f56lci' | 'f54' | 'f54lci' | 'j01';
+export type MiniModel = 'r53' | 'r52' | 'r56' | 'r55' | 'f56' | 'f56lci' | 'f54' | 'f54lci' | 'j01' | 'gp1' | 'gp2' | 'gp3';
 
 interface ThemeConfig {
   id: MiniModel;
@@ -23,6 +23,13 @@ export const MODELS: ThemeConfig[] = [
       carImageUrl: getAssetUrl('models/r53.png')
   },
   { 
+      id: 'gp1', 
+      name: 'Mini GP1', 
+      years: '2006', 
+      color: '#5d7389', // Thunder Blue
+      carImageUrl: getAssetUrl('models/gp1.png')
+  },
+  { 
       id: 'r52', 
       name: 'R52 Convertible', 
       years: '2004-2008', 
@@ -35,6 +42,13 @@ export const MODELS: ThemeConfig[] = [
       years: '2006-2013', 
       color: '#FCD34D', // Mellow Yellow
       carImageUrl: getAssetUrl('models/r56.png')
+  },
+  { 
+      id: 'gp2', 
+      name: 'Mini GP2', 
+      years: '2013', 
+      color: '#4b5563', // Thunder Grey
+      carImageUrl: getAssetUrl('models/gp2.png')
   },
   { 
       id: 'r55', 
@@ -58,6 +72,13 @@ export const MODELS: ThemeConfig[] = [
       carImageUrl: getAssetUrl('models/f56lci.png')
   },
   { 
+      id: 'gp3', 
+      name: 'Mini GP3', 
+      years: '2020', 
+      color: '#9ca3af', // Racing Grey
+      carImageUrl: getAssetUrl('models/gp3.png')
+  },
+  { 
       id: 'f54', 
       name: 'Clubman F54', 
       years: '2015-2019', 
@@ -76,7 +97,7 @@ export const MODELS: ThemeConfig[] = [
       name: 'J01 / F66', 
       years: '2024+', 
       color: '#0ea5e9', // Blazing Blue
-      carImageUrl: getAssetUrl('models/j01.jpg') // Fixed extension based on screenshot
+      carImageUrl: getAssetUrl('models/j01.jpg')
   },
 ];
 
