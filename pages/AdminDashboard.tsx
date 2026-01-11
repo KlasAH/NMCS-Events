@@ -106,16 +106,17 @@ const AdminDashboard: React.FC = () => {
     }
   }, [activeTab, session]);
 
-  if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
-  if (!session) return <Navigate to="/login" replace />;
-  if (!isAdmin) { return ( <div className="pt-32 text-center">Restricted Access</div> ); }
-
-  // --- FINANCIALS LOGIC ---
+  // --- FINANCIALS LOGIC (Fixed: Hook moved before early returns) ---
   const financialStats = useMemo(() => {
       const income = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
       const expense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
       return { income, expense, net: income - expense };
   }, [transactions]);
+
+  // --- EARLY RETURNS ---
+  if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
+  if (!session) return <Navigate to="/login" replace />;
+  if (!isAdmin) { return ( <div className="pt-32 text-center">Restricted Access</div> ); }
 
   const handleSaveTransaction = async (e: React.FormEvent) => {
       e.preventDefault();
