@@ -101,6 +101,9 @@ DROP POLICY IF EXISTS "Admins can manage settings" ON public.app_settings;
 CREATE POLICY "Admins can manage settings" ON public.app_settings FOR ALL USING (is_admin());
 DROP POLICY IF EXISTS "Public/Auth can read settings" ON public.app_settings;
 CREATE POLICY "Public/Auth can read settings" ON public.app_settings FOR SELECT USING (true);
+
+-- 7. FEATURE: Board Role Column
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
@@ -510,6 +513,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks <code>auth.role() IN (...)</code> to satisfy security linter.</li>
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
                         <li><strong>NEW: App Settings:</strong> Added table for configurable auto-logout timer.</li>
+                        <li><strong>NEW: Board Role:</strong> Added board_role column to profiles.</li>
                     </ul>
                 </div>
 

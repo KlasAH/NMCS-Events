@@ -14,6 +14,7 @@ const translations: Translations = {
   // Navigation
   events: { sv: 'Event', en: 'Events' },
   admin: { sv: 'Admin', en: 'Admin' },
+  profile: { sv: 'Min Profil', en: 'My Profile' },
   login: { sv: 'Logga in', en: 'Login' },
   logout: { sv: 'Logga ut', en: 'Logout' },
   back: { sv: 'Tillbaka', en: 'Back' },
@@ -55,6 +56,12 @@ const translations: Translations = {
   forgotSub: { sv: 'Ange din e-post för att få en länk', en: 'Enter your email to receive a link' },
   resetConfirmHeader: { sv: 'Nytt lösenord', en: 'New Password' },
   resetConfirmSub: { sv: 'Ange ditt nya säkra lösenord', en: 'Enter your new secure password' },
+  
+  // Profile
+  boardRole: { sv: 'Styrelseroll', en: 'Board Role' },
+  save: { sv: 'Spara', en: 'Save' },
+  changePassword: { sv: 'Byt Lösenord', en: 'Change Password' },
+  newPassword: { sv: 'Nytt Lösenord', en: 'New Password' },
   
   // Form Labels & Placeholders
   emailOrUsername: { sv: 'E-post eller Användarnamn', en: 'Email or Username' },

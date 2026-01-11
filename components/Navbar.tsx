@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 // @ts-ignore
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Home, Shield, LogIn, LogOut, Sun, Moon, Car } from 'lucide-react';
+import { Home, Shield, LogIn, LogOut, Sun, Moon, Car, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme, MODELS } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -19,7 +19,7 @@ const Navbar: React.FC = () => {
   const navItems = [
     { name: t('events'), path: '/', icon: <Home size={18} /> },
     ...(isAdmin ? [{ name: t('admin'), path: '/admin', icon: <Shield size={18} /> }] : []),
-    // Only show Logout if session exists. Public login hidden from navbar.
+    ...(session ? [{ name: t('profile'), path: '/profile', icon: <UserCircle size={18} /> }] : []),
     ...(session
       ? [{ name: t('logout'), action: signOut, icon: <LogOut size={18} /> }]
       : []),

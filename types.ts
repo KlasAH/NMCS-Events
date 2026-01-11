@@ -118,5 +118,6 @@ export interface UserProfile {
   email: string;
   username?: string;
   role: 'admin' | 'user' | 'board';
+  board_role?: 'Ordförande' | 'Kassör' | 'Teknikansvarig/Ledamot' | 'Ledamot' | 'Suppleant' | null;
   car_model?: string;
 }
