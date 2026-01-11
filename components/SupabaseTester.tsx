@@ -89,6 +89,18 @@ CREATE INDEX IF NOT EXISTS idx_registrations_meeting_id ON public.registrations(
 CREATE INDEX IF NOT EXISTS idx_registrations_user_id ON public.registrations(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_meeting_id ON public.transactions(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON public.user_roles(user_id);
+
+-- 6. FEATURE: App Settings for Auto Logout
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admins can manage settings" ON public.app_settings;
+CREATE POLICY "Admins can manage settings" ON public.app_settings FOR ALL USING (is_admin());
+DROP POLICY IF EXISTS "Public/Auth can read settings" ON public.app_settings;
+CREATE POLICY "Public/Auth can read settings" ON public.app_settings FOR SELECT USING (true);
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
@@ -497,6 +509,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <li><strong>Fixed Dependency Error (2BP01):</strong> SQL now explicitly drops old "Board" policies before dropping functions.</li>
                         <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks <code>auth.role() IN (...)</code> to satisfy security linter.</li>
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
+                        <li><strong>NEW: App Settings:</strong> Added table for configurable auto-logout timer.</li>
                     </ul>
                 </div>
 

@@ -24,6 +24,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authStatus, setAuthStatus] = useState<string>('Initializing...');
+  const [autoLogoutTime, setAutoLogoutTime] = useState<number>(8 * 60 * 60 * 1000); // Default 8 hours
+
+  useEffect(() => {
+    // Fetch custom auto-logout time from app_settings
+    if (!isDemoMode) {
+      const fetchSettings = async () => {
+        const { data } = await supabase.from('app_settings').select('value').eq('key', 'auto_logout_hours').single();
+        if (data?.value) {
+            // value is stored as hours string, convert to ms
+            setAutoLogoutTime(parseFloat(data.value) * 60 * 60 * 1000);
+        }
+      };
+      fetchSettings();
+    }
+  }, []);
 
   useEffect(() => {
     if (isDemoMode) {
@@ -62,6 +77,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // INACTIVITY TRACKER
+  useEffect(() => {
+      if (!session) return;
+
+      let timeoutId: NodeJS.Timeout;
+      
+      const resetTimer = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          timeoutId = setTimeout(() => {
+              console.log("[Auth] Auto-logging out due to inactivity");
+              signOut();
+              // Optional: Show alert before redirect
+              // alert("You have been logged out due to inactivity.");
+          }, autoLogoutTime);
+      };
+
+      const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+      events.forEach(event => document.addEventListener(event, resetTimer));
+      
+      resetTimer(); // Start immediately
+
+      return () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          events.forEach(event => document.removeEventListener(event, resetTimer));
+      };
+  }, [session, autoLogoutTime]);
 
   const checkAdmin = async (currentSession: Session) => {
     setAuthStatus('Checking Admin Role...');
