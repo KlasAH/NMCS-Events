@@ -130,7 +130,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               auth: {
                   persistSession: false, 
                   autoRefreshToken: false,
-                  detectSessionInUrl: false
+                  detectSessionInUrl: false,
+                  storageKey: 'memory' // <--- Fix for GoTrue warning
               }
           });
 

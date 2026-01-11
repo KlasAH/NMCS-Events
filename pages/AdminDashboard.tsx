@@ -15,11 +15,12 @@ import Modal from '../components/Modal';
 const MASTER_ADMIN_EMAIL = 'klas.ahlman@gmail.com';
 
 const AdminDashboard: React.FC = () => {
+  // 1. CONTEXT HOOKS
   const { isAdmin, loading, session, signOut, updatePassword, sendPasswordReset, authStatus, checkAdmin } = useAuth();
   const { t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings'>('overview');
   
-  // Selection State
+  // 2. STATE HOOKS
+  const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings'>('overview');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Data State
@@ -49,16 +50,19 @@ const AdminDashboard: React.FC = () => {
   const [editingItinerary, setEditingItinerary] = useState<ItineraryItem[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
 
-  // --- STYLES ---
-  const INPUT_STYLE = "w-full px-5 py-4 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-lg font-bold text-slate-900 dark:text-white shadow-sm focus:border-mini-red focus:ring-4 focus:ring-red-500/10 transition-all outline-none placeholder:text-slate-400";
-  const LABEL_STYLE = "block text-xs font-black text-slate-900 dark:text-slate-200 uppercase tracking-widest mb-2";
-  const SECTION_STYLE = "p-6 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700";
+  // 3. MEMO HOOKS (Must be before any return)
+  const financialStats = useMemo(() => {
+      const income = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+      const expense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+      return { income, expense, net: income - expense };
+  }, [transactions]);
 
-  // --- DATA LOADING ---
+  // 4. EFFECT HOOKS (Must be before any return)
+  
+  // Fetch Events (Overview)
   useEffect(() => {
     if (!isAdmin && !isDemoMode) return;
 
-    // 1. Fetch Events (Overview)
     const fetchEvents = async () => {
         if(isDemoMode) {
              setEvents([
@@ -74,7 +78,7 @@ const AdminDashboard: React.FC = () => {
     fetchEvents();
   }, [isAdmin]);
 
-  // 2. Fetch Details for Selected Event (Registrations/Finances)
+  // Fetch Details for Selected Event
   useEffect(() => {
       const fetchData = async () => {
           if (!selectedEventId) return;
@@ -95,7 +99,7 @@ const AdminDashboard: React.FC = () => {
       fetchData();
   }, [selectedEventId, activeTab, isAdmin]);
 
-  // 3. Fetch Settings (Master Admin)
+  // Fetch Settings (Master Admin)
   useEffect(() => {
     if (activeTab === 'settings' && session?.user?.email === MASTER_ADMIN_EMAIL && !isDemoMode) {
         const fetchSettings = async () => {
@@ -106,12 +110,9 @@ const AdminDashboard: React.FC = () => {
     }
   }, [activeTab, session]);
 
-  // --- FINANCIALS LOGIC (Fixed: Hook moved before early returns) ---
-  const financialStats = useMemo(() => {
-      const income = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-      const expense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-      return { income, expense, net: income - expense };
-  }, [transactions]);
+  // --- STYLES ---
+  const INPUT_STYLE = "w-full px-5 py-4 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-lg font-bold text-slate-900 dark:text-white shadow-sm focus:border-mini-red focus:ring-4 focus:ring-red-500/10 transition-all outline-none placeholder:text-slate-400";
+  const LABEL_STYLE = "block text-xs font-black text-slate-900 dark:text-slate-200 uppercase tracking-widest mb-2";
 
   // --- EARLY RETURNS ---
   if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
@@ -165,7 +166,6 @@ const AdminDashboard: React.FC = () => {
       }
   }
 
-  // --- SETTINGS LOGIC ---
   const handleSaveSettings = async () => {
       if (isDemoMode) {
           setSettingsStatus('Saved (Demo)');
@@ -186,7 +186,6 @@ const AdminDashboard: React.FC = () => {
       }
   }
 
-  // --- EDITOR LOGIC ---
   const startEditEvent = async (evt?: Meeting) => {
       setEditorTab('general');
       if(evt) {
@@ -218,9 +217,8 @@ const AdminDashboard: React.FC = () => {
       setIsEditingEvent(true);
   }
 
-  // --- IMAGE UPLOAD & ITINERARY LOGIC (REUSED FROM PREVIOUS) ---
+  // --- IMAGE UPLOAD & ITINERARY LOGIC ---
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: string, arrayIndex?: number, arrayName?: 'hotel_info' | 'parking_info' | 'extra_info') => {
-    // ... (Keep existing implementation logic)
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
     const year = new Date().getFullYear();
@@ -277,8 +275,7 @@ const AdminDashboard: React.FC = () => {
     if(data) setEvents(data);
     setIsEditingEvent(false);
   }
-
-  // ... (Helper renderers from previous: renderExtraSection, updateLogisticsItem etc.) 
+  
   const updateLogisticsItem = (type: any, index: number, field: string, value: any) => {
       setEditingEventData(prev => {
           const arr = [...(prev[type] as any[] || [])];
@@ -306,7 +303,7 @@ const AdminDashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-        {/* Sidebar Tabs (Hidden when editing) */}
+        {/* Sidebar Tabs */}
         {!isEditingEvent && (
             <div className="md:col-span-1 flex flex-col gap-2">
                  {[
@@ -335,7 +332,7 @@ const AdminDashboard: React.FC = () => {
         <div className={isEditingEvent ? "col-span-4" : "md:col-span-3"}>
             <AnimatePresence mode='wait'>
             {isEditingEvent ? (
-                // --- EDITOR UI (Reusing previous structure simplified for brevity) ---
+                // --- EDITOR UI ---
                 <motion.div
                     key="editor"
                     initial={{ opacity: 0, y: 20 }}
@@ -353,7 +350,6 @@ const AdminDashboard: React.FC = () => {
                         ))}
                     </div>
                     
-                    {/* Render Basic Inputs based on Editor Tab (Simplified for brevity as core request was Financials) */}
                     {editorTab === 'general' && (
                         <div className="space-y-4">
                             <input value={editingEventData.title} onChange={e => setEditingEventData({...editingEventData, title: e.target.value})} placeholder="Title" className={INPUT_STYLE} />
@@ -445,7 +441,7 @@ const AdminDashboard: React.FC = () => {
                         </div>
                     )}
                     
-                    {/* 3. FINANCIALS TAB (NEW) */}
+                    {/* 3. FINANCIALS TAB */}
                     {activeTab === 'finances' && (
                         <div className="space-y-6">
                             {!selectedEventId ? (

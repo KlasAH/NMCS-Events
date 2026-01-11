@@ -25,7 +25,8 @@ const App: React.FC = () => {
     <LanguageProvider>
       <ThemeProvider>
         <AuthProvider>
-          <Router>
+          {/* @ts-ignore - Future flags are valid in v6.20+ but TS might not know without update */}
+          <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
             <ScrollToTop />
             <div className="min-h-screen bg-[#f3f4f6] dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans selection:bg-mini-red selection:text-white transition-colors duration-300">
               <Navbar />
