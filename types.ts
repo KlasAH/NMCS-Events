@@ -12,7 +12,14 @@ export interface LinkItem {
   url: string;
 }
 
+export interface ContactPerson {
+  name: string;
+  email?: string;
+  phone?: string;
+}
+
 export interface HotelDetails {
+  id?: string; // Support for multiple
   name: string;
   address: string;
   map_url: string;
@@ -20,16 +27,18 @@ export interface HotelDetails {
   price_double: string;
   description: string;
   booking_links?: LinkItem[];
-  image_url?: string; // New: Small card image
+  image_url?: string;
+  contact?: ContactPerson; // New
 }
 
 export interface ParkingDetails {
+  id?: string; // Support for multiple
   location: string;
   cost: string;
   security_info: string;
   map_url?: string;
-  apps?: LinkItem[];
-  image_url?: string; // New: Small card image
+  apps?: LinkItem[]; // EasyPark, Parkster etc
+  image_url?: string;
 }
 
 export interface MapConfig {
@@ -40,14 +49,14 @@ export interface MapConfig {
 
 export interface ExtraInfoSection {
   id: string;
-  type: 'food' | 'racing' | 'roadtrip' | 'general'; // New: To distinguish types
+  type: 'food' | 'racing' | 'roadtrip' | 'general';
   title: string;
   icon: 'utensils' | 'flag' | 'info' | 'map' | 'car'; 
   content: string;
   links?: LinkItem[];
-  image_url?: string; // New
-  address?: string;   // New (specifically for Racing/Venues)
-  website_url?: string; // New (specifically for Racing homepage)
+  image_url?: string;
+  address?: string;
+  website_url?: string;
 }
 
 export interface Meeting {
@@ -59,11 +68,12 @@ export interface Meeting {
   location_name: string;
   description: string;
   cover_image_url: string;
-  pdf_url?: string; // New: Link to PDF in storage
+  pdf_url?: string;
   maps_config?: MapConfig[]; 
   is_pinned?: boolean;
-  hotel_info?: HotelDetails;
-  parking_info?: ParkingDetails;
+  // Updated to allow arrays or legacy single object
+  hotel_info?: HotelDetails | HotelDetails[]; 
+  parking_info?: ParkingDetails | ParkingDetails[];
   extra_info?: ExtraInfoSection[];
   custom_data?: Record<string, string | number | boolean>;
 }
@@ -106,7 +116,7 @@ export interface Transaction {
 export interface UserProfile {
   id: string;
   email: string;
-  username?: string; // New: Added username
+  username?: string;
   role: 'admin' | 'user' | 'board';
-  car_model?: string; // New: Selected model preference
+  car_model?: string;
 }
