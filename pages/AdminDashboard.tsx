@@ -4,11 +4,12 @@ import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe } from 'lucide-react';
-import { Registration, Transaction, Meeting, ExtraInfoSection, HotelDetails, ParkingDetails, ItineraryItem } from '../types';
+import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode } from 'lucide-react';
+import { Registration, Transaction, Meeting, ExtraInfoSection, HotelDetails, ParkingDetails, ItineraryItem, MapConfig } from '../types';
 import { supabase, isDemoMode, finalUrl, finalKey, STORAGE_BUCKET } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
 import { createClient } from '@supabase/supabase-js';
+import { format } from 'date-fns';
 
 const AdminDashboard: React.FC = () => {
   const { isAdmin, loading, session, signOut, updatePassword, sendPasswordReset, authStatus, checkAdmin } = useAuth();
@@ -32,13 +33,20 @@ const AdminDashboard: React.FC = () => {
 
   // Editing State
   const [isEditingEvent, setIsEditingEvent] = useState(false);
-  const [editorTab, setEditorTab] = useState<'general' | 'itinerary' | 'logistics' | 'extras'>('general');
+  // UPDATED TABS
+  const [editorTab, setEditorTab] = useState<'general' | 'itinerary' | 'logistics' | 'food' | 'track' | 'roadtrip' | 'preview'>('general');
   const [editingEventData, setEditingEventData] = useState<Partial<Meeting>>({});
   const [editingItinerary, setEditingItinerary] = useState<ItineraryItem[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
 
   // Debug State
   const [diagLog, setDiagLog] = useState<string>('');
+
+  // --- STYLES ---
+  // High contrast, large text, easy to tap inputs
+  const INPUT_STYLE = "w-full px-5 py-4 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-lg font-bold text-slate-900 dark:text-white shadow-sm focus:border-mini-red focus:ring-4 focus:ring-red-500/10 transition-all outline-none placeholder:text-slate-400";
+  const LABEL_STYLE = "block text-xs font-black text-slate-900 dark:text-slate-200 uppercase tracking-widest mb-2";
+  const SECTION_STYLE = "p-6 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-slate-200 dark:border-slate-700";
 
   // --- DATA LOADING ---
   useEffect(() => {
@@ -274,7 +282,7 @@ const AdminDashboard: React.FC = () => {
       updateLogisticsItem(type, index, 'map_url', smartUrl);
   };
 
-  // --- EXTRAS ---
+  // --- EXTRAS (Generic Handler for Food, Track, RoadTrip) ---
   const addExtraInfo = (type: 'food' | 'racing' | 'roadtrip' | 'general') => {
       const newExtra: ExtraInfoSection = {
           id: `ex-${Date.now()}`,
@@ -289,19 +297,22 @@ const AdminDashboard: React.FC = () => {
       }));
   };
 
-  const updateExtraInfo = (index: number, field: string, value: any) => {
+  // We need to find the correct index in the global array because the view is filtered
+  const updateExtraInfoGlobal = (id: string, field: string, value: any) => {
       setEditingEventData(prev => {
           const arr = [...(prev.extra_info as ExtraInfoSection[] || [])];
-          arr[index] = { ...arr[index], [field]: value };
+          const index = arr.findIndex(item => item.id === id);
+          if (index !== -1) {
+              arr[index] = { ...arr[index], [field]: value };
+          }
           return { ...prev, extra_info: arr };
       });
   };
 
-  const removeExtraInfo = (index: number) => {
+  const removeExtraInfoGlobal = (id: string) => {
       setEditingEventData(prev => {
           const arr = [...(prev.extra_info as ExtraInfoSection[] || [])];
-          arr.splice(index, 1);
-          return { ...prev, extra_info: arr };
+          return { ...prev, extra_info: arr.filter(item => item.id !== id) };
       });
   };
 
@@ -362,6 +373,88 @@ const AdminDashboard: React.FC = () => {
   }
 
   // --- RENDERERS ---
+
+  // Helper to render Extra Info sections by type
+  const renderExtraSection = (type: 'food' | 'racing' | 'roadtrip') => {
+      const items = editingEventData.extra_info?.filter(e => e.type === type) || [];
+      
+      return (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+              <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-lg text-slate-900 dark:text-white capitalize flex items-center gap-2">
+                      {type === 'food' && <Utensils className="text-orange-500" />}
+                      {type === 'racing' && <Flag className="text-red-500" />}
+                      {type === 'roadtrip' && <Map className="text-blue-500" />}
+                      {type === 'racing' ? 'Track Day' : type === 'roadtrip' ? 'Road Trips' : 'Food & Dining'}
+                  </h3>
+                  <button onClick={() => addExtraInfo(type)} className="text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 px-3 py-2 rounded-lg font-bold flex items-center gap-1">
+                      <Plus size={14} /> Add {type === 'racing' ? 'Track' : type === 'roadtrip' ? 'Route' : 'Food'} Info
+                  </button>
+              </div>
+
+              {items.length === 0 && <div className="text-center py-8 text-slate-400 italic">No information added yet.</div>}
+
+              {items.map((extra) => (
+                  <div key={extra.id} className={`${SECTION_STYLE} relative group`}>
+                      <button 
+                          onClick={() => removeExtraInfoGlobal(extra.id)}
+                          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors"
+                      >
+                          <Trash2 size={20} />
+                      </button>
+                      
+                      <div className="space-y-4">
+                          <div>
+                            <label className={LABEL_STYLE}>Title</label>
+                            <input 
+                                type="text" 
+                                value={extra.title}
+                                onChange={(e) => updateExtraInfoGlobal(extra.id, 'title', e.target.value)}
+                                className={INPUT_STYLE}
+                                placeholder="e.g. Lunch at The Mill"
+                            />
+                          </div>
+                          <div>
+                            <label className={LABEL_STYLE}>Details / Description</label>
+                            <textarea 
+                                rows={4}
+                                value={extra.content}
+                                onChange={(e) => updateExtraInfoGlobal(extra.id, 'content', e.target.value)}
+                                className={INPUT_STYLE}
+                                placeholder="Description..."
+                            />
+                          </div>
+                          
+                          {/* Image Upload for this extra */}
+                          <div>
+                                <label className={LABEL_STYLE}>Section Image</label>
+                                <div className="flex items-center gap-2">
+                                    <input 
+                                        type="text" 
+                                        value={extra.image_url || ''}
+                                        onChange={(e) => updateExtraInfoGlobal(extra.id, 'image_url', e.target.value)}
+                                        className={INPUT_STYLE}
+                                        placeholder="Image URL"
+                                    />
+                                    <label className="cursor-pointer bg-slate-200 dark:bg-slate-700 p-3 rounded-xl hover:bg-slate-300">
+                                        <Upload size={24} />
+                                        <input type="file" accept="image/*" className="hidden" 
+                                            onChange={(e) => {
+                                                const globalIndex = editingEventData.extra_info?.findIndex(x => x.id === extra.id);
+                                                if (globalIndex !== undefined && globalIndex !== -1) {
+                                                    handleImageUpload(e, 'image_url', globalIndex, 'extra_info');
+                                                }
+                                            }} 
+                                        />
+                                    </label>
+                                </div>
+                          </div>
+                      </div>
+                  </div>
+              ))}
+          </div>
+      );
+  }
 
   return (
     <div className="pt-24 pb-12 px-4 max-w-7xl mx-auto min-h-screen">
@@ -426,16 +519,17 @@ const AdminDashboard: React.FC = () => {
                             </h2>
                             <p className="text-sm text-slate-500">{editingEventData.title || 'Untitled Event'}</p>
                         </div>
-                        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-                            {(['general', 'itinerary', 'logistics', 'extras'] as const).map(tab => (
+                        <div className="flex flex-wrap gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-xl">
+                            {(['general', 'itinerary', 'logistics', 'food', 'track', 'roadtrip', 'preview'] as const).map(tab => (
                                 <button
                                     key={tab}
+                                    type="button" 
                                     onClick={() => setEditorTab(tab)}
-                                    className={`px-4 py-2 rounded-md text-sm font-bold capitalize transition-colors ${
+                                    className={`px-4 py-2.5 rounded-lg text-sm font-bold capitalize transition-colors ${
                                         editorTab === tab ? 'bg-white dark:bg-slate-700 text-mini-red shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'
                                     }`}
                                 >
-                                    {tab}
+                                    {tab === 'roadtrip' ? 'Road Trip' : tab}
                                 </button>
                             ))}
                         </div>
@@ -449,96 +543,81 @@ const AdminDashboard: React.FC = () => {
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4">
                             <div className="space-y-6">
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Event Title</label>
+                                    <label className={LABEL_STYLE}>Event Title</label>
                                     <input 
                                         type="text" 
                                         value={editingEventData.title || ''}
                                         onChange={(e) => setEditingEventData({...editingEventData, title: e.target.value})}
-                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        className={INPUT_STYLE}
+                                        placeholder="e.g. Summer Run 2024"
                                     />
                                 </div>
                                 
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-2 gap-6">
                                     <div>
-                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Start Date</label>
+                                        <label className={LABEL_STYLE}>Start Date</label>
                                         <input 
                                             type="date" 
                                             value={editingEventData.date || ''}
                                             onChange={(e) => setEditingEventData({...editingEventData, date: e.target.value})}
-                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                            className={INPUT_STYLE}
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">End Date</label>
+                                        <label className={LABEL_STYLE}>End Date</label>
                                         <input 
                                             type="date" 
                                             value={editingEventData.end_date || ''}
                                             onChange={(e) => setEditingEventData({...editingEventData, end_date: e.target.value})}
-                                            className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                            className={INPUT_STYLE}
                                         />
                                     </div>
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Location Name</label>
+                                    <label className={LABEL_STYLE}>Location Name</label>
                                     <input 
                                         type="text" 
                                         value={editingEventData.location_name || ''}
                                         onChange={(e) => setEditingEventData({...editingEventData, location_name: e.target.value})}
-                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        className={INPUT_STYLE}
+                                        placeholder="e.g. Zurich, Switzerland"
                                     />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Google Maps Link (Main Location)</label>
-                                    <div className="relative">
-                                        <input 
-                                            type="text" 
-                                            value={editingEventData.maps_config?.[0]?.url || ''}
-                                            onChange={(e) => {
-                                                const newMaps = [...(editingEventData.maps_config || [])];
-                                                if(newMaps.length === 0) newMaps.push({ label: 'Main Location', url: e.target.value, groupName: 'General' });
-                                                else newMaps[0] = { ...newMaps[0], url: e.target.value };
-                                                setEditingEventData({...editingEventData, maps_config: newMaps});
-                                            }}
-                                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
-                                            placeholder="https://maps.google.com/..."
-                                        />
-                                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                                    </div>
                                 </div>
                                 
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                                    <label className={LABEL_STYLE}>Description</label>
                                     <textarea 
-                                        rows={6}
+                                        rows={8}
                                         value={editingEventData.description || ''}
                                         onChange={(e) => setEditingEventData({...editingEventData, description: e.target.value})}
-                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:border-mini-red"
+                                        className={INPUT_STYLE}
+                                        placeholder="Full details about the event..."
                                     />
                                 </div>
                             </div>
                             
                             <div className="space-y-6">
-                                <div className="p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700">
-                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Cover Image</label>
+                                <div className={SECTION_STYLE}>
+                                    <label className={LABEL_STYLE}>Cover Image</label>
                                     <div className="flex flex-col gap-4">
                                         {editingEventData.cover_image_url ? (
-                                            <div className="relative h-48 w-full rounded-xl overflow-hidden group">
+                                            <div className="relative h-64 w-full rounded-2xl overflow-hidden group shadow-md">
                                                 <img src={editingEventData.cover_image_url} alt="Cover" className="w-full h-full object-cover" />
                                                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                                     <button 
                                                         onClick={() => setEditingEventData({...editingEventData, cover_image_url: ''})}
-                                                        className="bg-red-500 text-white p-2 rounded-full hover:bg-red-600"
+                                                        className="bg-red-500 text-white p-3 rounded-full hover:bg-red-600 transition-transform hover:scale-110"
                                                     >
-                                                        <Trash2 size={20} />
+                                                        <Trash2 size={24} />
                                                     </button>
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="h-48 w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl flex flex-col items-center justify-center text-slate-400">
-                                                <Upload size={32} className="mb-2" />
-                                                <span className="text-sm">Drag & drop or click to upload</span>
+                                            <div className="relative h-64 w-full border-4 border-dashed border-slate-300 dark:border-slate-600 rounded-2xl flex flex-col items-center justify-center text-slate-400 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                                                <Upload size={48} className="mb-4 text-slate-300 dark:text-slate-600" />
+                                                <span className="text-lg font-bold">Drag & drop cover image</span>
+                                                <span className="text-sm mt-2">or click to browse</span>
                                                 <input 
                                                     type="file" 
                                                     accept="image/*"
@@ -547,7 +626,7 @@ const AdminDashboard: React.FC = () => {
                                                 />
                                             </div>
                                         )}
-                                        {uploadingImage && <div className="text-xs text-center text-mini-red animate-pulse">Uploading...</div>}
+                                        {uploadingImage && <div className="text-sm font-bold text-center text-mini-red animate-pulse">Uploading Image...</div>}
                                     </div>
                                 </div>
                             </div>
@@ -558,66 +637,84 @@ const AdminDashboard: React.FC = () => {
                     {editorTab === 'itinerary' && (
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                             <div className="flex justify-between items-center">
-                                <h3 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-                                    <Clock size={20} className="text-mini-red"/> Event Itinerary
+                                <h3 className="font-bold text-xl text-slate-900 dark:text-white flex items-center gap-3">
+                                    <Clock size={24} className="text-mini-red"/> Event Itinerary
                                 </h3>
-                                <button onClick={addItineraryItem} className="flex items-center gap-2 text-sm bg-mini-black dark:bg-white text-white dark:text-black px-3 py-1.5 rounded-lg font-bold">
-                                    <Plus size={14} /> Add Item
+                                <button onClick={addItineraryItem} className="flex items-center gap-2 text-sm bg-mini-black dark:bg-white text-white dark:text-black px-5 py-3 rounded-xl font-bold shadow-lg shadow-black/10">
+                                    <Plus size={18} /> Add Item
                                 </button>
                             </div>
 
-                            <div className="space-y-3">
-                                {editingItinerary.length === 0 && <div className="text-center py-8 text-slate-400 italic">No itinerary items yet.</div>}
+                            <div className="space-y-4">
+                                {editingItinerary.length === 0 && <div className="text-center py-12 text-slate-400 italic text-lg">No itinerary items yet.</div>}
                                 {editingItinerary.map((item, idx) => (
-                                    <div key={idx} className="flex flex-col md:flex-row gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
-                                        <div className="flex gap-2 min-w-[200px]">
-                                             <input 
-                                                type="date"
-                                                value={item.date}
-                                                onChange={(e) => updateItineraryItem(idx, 'date', e.target.value)}
-                                                className="w-full px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"
-                                             />
-                                             <input 
-                                                type="time"
-                                                value={item.start_time}
-                                                onChange={(e) => updateItineraryItem(idx, 'start_time', e.target.value)}
-                                                className="w-24 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs font-mono"
-                                             />
-                                        </div>
-                                        <div className="flex-grow space-y-2">
-                                            <input 
-                                                type="text"
-                                                placeholder="Title (e.g. Morning Briefing)"
-                                                value={item.title}
-                                                onChange={(e) => updateItineraryItem(idx, 'title', e.target.value)}
-                                                className="w-full px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 font-bold text-sm"
-                                            />
-                                            <textarea 
-                                                rows={1}
-                                                placeholder="Description..."
-                                                value={item.description || ''}
-                                                onChange={(e) => updateItineraryItem(idx, 'description', e.target.value)}
-                                                className="w-full px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"
-                                            />
-                                            <div className="flex gap-2">
+                                    <div key={idx} className={`${SECTION_STYLE} flex flex-col xl:flex-row gap-6`}>
+                                        <div className="flex flex-row xl:flex-col gap-4 min-w-[200px]">
+                                             <div className="w-full">
+                                                <label className={LABEL_STYLE}>Date</label>
                                                 <input 
-                                                    type="text"
-                                                    placeholder="Location Details / Address"
-                                                    value={item.location_details || ''}
-                                                    onChange={(e) => updateItineraryItem(idx, 'location_details', e.target.value)}
-                                                    className="flex-grow px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"
+                                                    type="date"
+                                                    value={item.date}
+                                                    onChange={(e) => updateItineraryItem(idx, 'date', e.target.value)}
+                                                    className={INPUT_STYLE}
                                                 />
+                                             </div>
+                                             <div className="w-full">
+                                                <label className={LABEL_STYLE}>Time</label>
+                                                <input 
+                                                    type="time"
+                                                    value={item.start_time}
+                                                    onChange={(e) => updateItineraryItem(idx, 'start_time', e.target.value)}
+                                                    className={`${INPUT_STYLE} font-mono`}
+                                                />
+                                             </div>
+                                        </div>
+                                        <div className="flex-grow space-y-4">
+                                            <div>
+                                                <label className={LABEL_STYLE}>Activity Title</label>
                                                 <input 
                                                     type="text"
-                                                    placeholder="Map URL"
-                                                    value={item.location_map_url || ''}
-                                                    onChange={(e) => updateItineraryItem(idx, 'location_map_url', e.target.value)}
-                                                    className="flex-grow px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"
+                                                    placeholder="e.g. Drivers Briefing"
+                                                    value={item.title}
+                                                    onChange={(e) => updateItineraryItem(idx, 'title', e.target.value)}
+                                                    className={INPUT_STYLE}
                                                 />
                                             </div>
+                                            <div>
+                                                <label className={LABEL_STYLE}>Description</label>
+                                                <textarea 
+                                                    rows={2}
+                                                    placeholder="Brief description..."
+                                                    value={item.description || ''}
+                                                    onChange={(e) => updateItineraryItem(idx, 'description', e.target.value)}
+                                                    className={INPUT_STYLE}
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className={LABEL_STYLE}>Location Details</label>
+                                                    <input 
+                                                        type="text"
+                                                        placeholder="Specific room or spot"
+                                                        value={item.location_details || ''}
+                                                        onChange={(e) => updateItineraryItem(idx, 'location_details', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={LABEL_STYLE}>Map URL</label>
+                                                    <input 
+                                                        type="text"
+                                                        placeholder="https://goo.gl/maps/..."
+                                                        value={item.location_map_url || ''}
+                                                        onChange={(e) => updateItineraryItem(idx, 'location_map_url', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                </div>
+                                            </div>
                                         </div>
-                                        <button onClick={() => removeItineraryItem(idx)} className="text-slate-400 hover:text-red-500 self-start p-1">
-                                            <Trash2 size={16} />
+                                        <button onClick={() => removeItineraryItem(idx)} className="text-slate-400 hover:text-red-500 self-start xl:self-center p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                                            <Trash2 size={24} />
                                         </button>
                                     </div>
                                 ))}
@@ -631,99 +728,114 @@ const AdminDashboard: React.FC = () => {
                             {/* HOTELS */}
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
-                                    <h3 className="font-bold text-mini-red flex items-center gap-2"><Building2 size={18}/> Hotels</h3>
-                                    <button onClick={addHotel} className="text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 px-2 py-1 rounded font-bold">+ Add Hotel</button>
+                                    <h3 className="font-bold text-mini-red flex items-center gap-2 text-xl"><Building2 size={24}/> Hotels</h3>
+                                    <button onClick={addHotel} className="text-sm bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 px-4 py-2 rounded-lg font-bold">+ Add Hotel</button>
                                 </div>
                                 
                                 {((editingEventData.hotel_info as HotelDetails[]) || []).map((hotel, idx) => (
-                                    <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 relative group">
+                                    <div key={idx} className={`${SECTION_STYLE} relative group`}>
                                          <button 
                                             onClick={() => {
                                                 const newArr = [...(editingEventData.hotel_info as HotelDetails[])];
                                                 newArr.splice(idx, 1);
                                                 setEditingEventData({...editingEventData, hotel_info: newArr});
                                             }}
-                                            className="absolute top-2 right-2 p-1 text-slate-400 hover:text-red-500 rounded"
+                                            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-500 bg-white dark:bg-slate-900 rounded-full shadow-sm"
                                         >
-                                            <Trash2 size={14} />
+                                            <Trash2 size={20} />
                                         </button>
 
-                                        <div className="space-y-3">
-                                            <input 
-                                                type="text" placeholder="Hotel Name"
-                                                value={hotel.name}
-                                                onChange={(e) => updateLogisticsItem('hotel_info', idx, 'name', e.target.value)}
-                                                className="w-full font-bold bg-transparent border-b border-slate-200 dark:border-slate-700 focus:border-mini-red outline-none text-sm"
-                                            />
-                                            
-                                            <div className="flex gap-2">
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className={LABEL_STYLE}>Hotel Name</label>
                                                 <input 
-                                                    type="text" placeholder="Address"
-                                                    value={hotel.address}
-                                                    onChange={(e) => updateLogisticsItem('hotel_info', idx, 'address', e.target.value)}
-                                                    className="flex-grow bg-white dark:bg-slate-900 px-2 py-1 rounded text-xs border border-slate-200 dark:border-slate-700"
+                                                    type="text" placeholder="Hotel Name"
+                                                    value={hotel.name}
+                                                    onChange={(e) => updateLogisticsItem('hotel_info', idx, 'name', e.target.value)}
+                                                    className={INPUT_STYLE}
                                                 />
-                                                <button 
-                                                    onClick={() => generateSmartMapLink('hotel_info', idx)}
-                                                    className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-2 rounded text-[10px] font-bold whitespace-nowrap"
-                                                    title="Generate Google Maps Link from Address"
-                                                >
-                                                    <MapPin size={10} className="inline mr-1"/>Smart Link
-                                                </button>
                                             </div>
                                             
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <input 
-                                                    type="text" placeholder="Single Price"
-                                                    value={hotel.price_single}
-                                                    onChange={(e) => updateLogisticsItem('hotel_info', idx, 'price_single', e.target.value)}
-                                                    className="bg-white dark:bg-slate-900 px-2 py-1 rounded text-xs border border-slate-200 dark:border-slate-700"
-                                                />
-                                                <input 
-                                                    type="text" placeholder="Double Price"
-                                                    value={hotel.price_double}
-                                                    onChange={(e) => updateLogisticsItem('hotel_info', idx, 'price_double', e.target.value)}
-                                                    className="bg-white dark:bg-slate-900 px-2 py-1 rounded text-xs border border-slate-200 dark:border-slate-700"
-                                                />
+                                            <div>
+                                                <label className={LABEL_STYLE}>Address</label>
+                                                <div className="flex gap-2">
+                                                    <input 
+                                                        type="text" placeholder="Address"
+                                                        value={hotel.address}
+                                                        onChange={(e) => updateLogisticsItem('hotel_info', idx, 'address', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                    <button 
+                                                        onClick={() => generateSmartMapLink('hotel_info', idx)}
+                                                        className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-4 rounded-xl font-bold whitespace-nowrap border-2 border-blue-100 dark:border-blue-800"
+                                                        title="Generate Google Maps Link from Address"
+                                                    >
+                                                        <MapPin size={20} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className={LABEL_STYLE}>Single Price</label>
+                                                    <input 
+                                                        type="text" placeholder="Price"
+                                                        value={hotel.price_single}
+                                                        onChange={(e) => updateLogisticsItem('hotel_info', idx, 'price_single', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={LABEL_STYLE}>Double Price</label>
+                                                    <input 
+                                                        type="text" placeholder="Price"
+                                                        value={hotel.price_double}
+                                                        onChange={(e) => updateLogisticsItem('hotel_info', idx, 'price_double', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                </div>
                                             </div>
 
                                             {/* Contact Person */}
-                                            <div className="bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Contact Person</p>
-                                                <div className="grid grid-cols-3 gap-2">
+                                            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                                                <p className="text-xs font-bold text-slate-400 uppercase mb-3">Contact Person</p>
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                     <input 
                                                         type="text" placeholder="Name"
                                                         value={hotel.contact?.name || ''}
                                                         onChange={(e) => updateLogisticsItem('hotel_info', idx, 'contact.name', e.target.value)}
-                                                        className="px-2 py-1 bg-slate-50 dark:bg-slate-800 rounded text-xs"
+                                                        className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 w-full"
                                                     />
                                                     <input 
                                                         type="text" placeholder="Email"
                                                         value={hotel.contact?.email || ''}
                                                         onChange={(e) => updateLogisticsItem('hotel_info', idx, 'contact.email', e.target.value)}
-                                                        className="px-2 py-1 bg-slate-50 dark:bg-slate-800 rounded text-xs"
+                                                        className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 w-full"
                                                     />
                                                     <input 
                                                         type="text" placeholder="Phone"
                                                         value={hotel.contact?.phone || ''}
                                                         onChange={(e) => updateLogisticsItem('hotel_info', idx, 'contact.phone', e.target.value)}
-                                                        className="px-2 py-1 bg-slate-50 dark:bg-slate-800 rounded text-xs"
+                                                        className="px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 w-full"
                                                     />
                                                 </div>
                                             </div>
 
                                             {/* Hotel Image Upload */}
-                                            <div className="flex items-center gap-2">
-                                                <input 
-                                                    type="text" placeholder="Image URL (or upload)"
-                                                    value={hotel.image_url || ''}
-                                                    onChange={(e) => updateLogisticsItem('hotel_info', idx, 'image_url', e.target.value)}
-                                                    className="flex-grow bg-white dark:bg-slate-900 px-2 py-1 rounded text-xs border border-slate-200 dark:border-slate-700"
-                                                />
-                                                <label className="cursor-pointer bg-slate-200 dark:bg-slate-700 p-1.5 rounded hover:bg-slate-300">
-                                                    <Upload size={12} />
-                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'image_url', idx, 'hotel_info')} />
-                                                </label>
+                                            <div>
+                                                <label className={LABEL_STYLE}>Image</label>
+                                                <div className="flex items-center gap-2">
+                                                    <input 
+                                                        type="text" placeholder="Image URL (or upload)"
+                                                        value={hotel.image_url || ''}
+                                                        onChange={(e) => updateLogisticsItem('hotel_info', idx, 'image_url', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                    <label className="cursor-pointer bg-slate-200 dark:bg-slate-700 p-3 rounded-xl hover:bg-slate-300">
+                                                        <Upload size={24} />
+                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'image_url', idx, 'hotel_info')} />
+                                                    </label>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -733,57 +845,70 @@ const AdminDashboard: React.FC = () => {
                             {/* PARKING */}
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
-                                    <h3 className="font-bold text-mini-red flex items-center gap-2"><Car size={18}/> Parking</h3>
-                                    <button onClick={addParking} className="text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 px-2 py-1 rounded font-bold">+ Add Parking</button>
+                                    <h3 className="font-bold text-mini-red flex items-center gap-2 text-xl"><Car size={24}/> Parking</h3>
+                                    <button onClick={addParking} className="text-sm bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 px-4 py-2 rounded-lg font-bold">+ Add Parking</button>
                                 </div>
 
                                 {((editingEventData.parking_info as ParkingDetails[]) || []).map((parking, idx) => (
-                                    <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 relative group">
+                                    <div key={idx} className={`${SECTION_STYLE} relative group`}>
                                          <button 
                                             onClick={() => {
                                                 const newArr = [...(editingEventData.parking_info as ParkingDetails[])];
                                                 newArr.splice(idx, 1);
                                                 setEditingEventData({...editingEventData, parking_info: newArr});
                                             }}
-                                            className="absolute top-2 right-2 p-1 text-slate-400 hover:text-red-500 rounded"
+                                            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-500 bg-white dark:bg-slate-900 rounded-full shadow-sm"
                                         >
-                                            <Trash2 size={14} />
+                                            <Trash2 size={20} />
                                         </button>
 
-                                        <div className="space-y-3">
-                                             <input 
-                                                type="text" placeholder="Location Name"
-                                                value={parking.location}
-                                                onChange={(e) => updateLogisticsItem('parking_info', idx, 'location', e.target.value)}
-                                                className="w-full font-bold bg-transparent border-b border-slate-200 dark:border-slate-700 focus:border-mini-red outline-none text-sm"
-                                            />
-                                            <div className="flex gap-2">
-                                                 <input 
-                                                    type="text" placeholder="Cost"
-                                                    value={parking.cost}
-                                                    onChange={(e) => updateLogisticsItem('parking_info', idx, 'cost', e.target.value)}
-                                                    className="w-1/3 bg-white dark:bg-slate-900 px-2 py-1 rounded text-xs border border-slate-200 dark:border-slate-700"
-                                                />
-                                                 <textarea 
-                                                    rows={1} placeholder="Security Info"
-                                                    value={parking.security_info}
-                                                    onChange={(e) => updateLogisticsItem('parking_info', idx, 'security_info', e.target.value)}
-                                                    className="flex-grow bg-white dark:bg-slate-900 px-2 py-1 rounded text-xs border border-slate-200 dark:border-slate-700"
-                                                />
-                                            </div>
-                                            <div className="flex gap-2">
+                                        <div className="space-y-4">
+                                             <div>
+                                                <label className={LABEL_STYLE}>Location Name</label>
                                                 <input 
-                                                    type="text" placeholder="Map URL"
-                                                    value={parking.map_url || ''}
-                                                    onChange={(e) => updateLogisticsItem('parking_info', idx, 'map_url', e.target.value)}
-                                                    className="flex-grow bg-white dark:bg-slate-900 px-2 py-1 rounded text-xs border border-slate-200 dark:border-slate-700"
+                                                    type="text" placeholder="Location Name"
+                                                    value={parking.location}
+                                                    onChange={(e) => updateLogisticsItem('parking_info', idx, 'location', e.target.value)}
+                                                    className={INPUT_STYLE}
                                                 />
-                                                <button 
-                                                    onClick={() => generateSmartMapLink('parking_info', idx)}
-                                                    className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-2 rounded text-[10px] font-bold whitespace-nowrap"
-                                                >
-                                                    <MapPin size={10} className="inline mr-1"/>Smart Link
-                                                </button>
+                                             </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                 <div>
+                                                    <label className={LABEL_STYLE}>Cost</label>
+                                                    <input 
+                                                        type="text" placeholder="Cost"
+                                                        value={parking.cost}
+                                                        onChange={(e) => updateLogisticsItem('parking_info', idx, 'cost', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                 </div>
+                                                 <div>
+                                                    <label className={LABEL_STYLE}>Security</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Security Info"
+                                                        value={parking.security_info}
+                                                        onChange={(e) => updateLogisticsItem('parking_info', idx, 'security_info', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                 </div>
+                                            </div>
+                                            <div>
+                                                <label className={LABEL_STYLE}>Map Link</label>
+                                                <div className="flex gap-2">
+                                                    <input 
+                                                        type="text" placeholder="Map URL"
+                                                        value={parking.map_url || ''}
+                                                        onChange={(e) => updateLogisticsItem('parking_info', idx, 'map_url', e.target.value)}
+                                                        className={INPUT_STYLE}
+                                                    />
+                                                    <button 
+                                                        onClick={() => generateSmartMapLink('parking_info', idx)}
+                                                        className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-4 rounded-xl font-bold whitespace-nowrap border-2 border-blue-100 dark:border-blue-800"
+                                                    >
+                                                        <MapPin size={20} />
+                                                    </button>
+                                                </div>
                                             </div>
                                             
                                             {/* Parking Apps */}
@@ -799,7 +924,7 @@ const AdminDashboard: React.FC = () => {
                                                                 else apps.push({ label: app, url: `https://google.com/search?q=${app}` });
                                                                 updateLogisticsItem('parking_info', idx, 'apps', apps);
                                                             }}
-                                                            className={`text-[10px] px-2 py-0.5 rounded-full border ${isActive ? 'bg-pink-100 border-pink-500 text-pink-700' : 'bg-white border-slate-200 text-slate-500'}`}
+                                                            className={`text-xs px-3 py-1.5 rounded-full border-2 font-bold transition-all ${isActive ? 'bg-pink-100 border-pink-500 text-pink-700' : 'bg-white border-slate-200 text-slate-500'}`}
                                                         >
                                                             {app}
                                                         </button>
@@ -813,80 +938,153 @@ const AdminDashboard: React.FC = () => {
                         </div>
                     )}
 
-                    {/* --- TAB: EXTRAS --- */}
-                    {editorTab === 'extras' && (
-                        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                             <h3 className="font-bold text-mini-red flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                                <Plus size={18} /> Additional Sections (Food, Racing, etc.)
-                            </h3>
-                             {editingEventData.extra_info?.map((extra, idx) => (
-                                    <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 relative group">
-                                        <button 
-                                            onClick={() => removeExtraInfo(idx)}
-                                            className="absolute top-2 right-2 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                        
-                                        <div className="flex items-center gap-2 mb-3">
-                                            {extra.type === 'food' && <Utensils className="text-orange-500" size={20} />}
-                                            {extra.type === 'racing' && <Flag className="text-red-500" size={20} />}
-                                            {extra.type === 'roadtrip' && <Map className="text-blue-500" size={20} />}
-                                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">{extra.type}</span>
-                                        </div>
+                    {/* --- TABS: FOOD & TRACK --- */}
+                    {(editorTab === 'food' || editorTab === 'track') && renderExtraSection(editorTab === 'food' ? 'food' : 'racing')}
 
-                                        <div className="space-y-3">
-                                            <input 
-                                                type="text" 
-                                                value={extra.title}
-                                                onChange={(e) => updateExtraInfo(idx, 'title', e.target.value)}
-                                                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 font-bold"
-                                                placeholder="Section Title"
-                                            />
-                                            <textarea 
-                                                rows={2}
-                                                value={extra.content}
-                                                onChange={(e) => updateExtraInfo(idx, 'content', e.target.value)}
-                                                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-sm"
-                                                placeholder="Content description..."
-                                            />
-                                            <div className="flex items-center gap-2">
+                    {/* --- TAB: ROAD TRIP (Special case: Combined Map Configs + Road Trip Info) --- */}
+                    {editorTab === 'roadtrip' && (
+                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                            {/* Part 1: QR Code Map Configs */}
+                            <div className={`${SECTION_STYLE}`}>
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="font-bold text-xl text-slate-900 dark:text-white flex items-center gap-3">
+                                        <QrCode className="text-mini-red" size={24} /> Map QR Codes
+                                    </h3>
+                                    <button 
+                                        onClick={() => {
+                                            const newMaps = [...(editingEventData.maps_config || [])];
+                                            newMaps.push({ label: '', url: '', groupName: 'Day 1' });
+                                            setEditingEventData({...editingEventData, maps_config: newMaps});
+                                        }}
+                                        className="text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 px-4 py-2 rounded-lg font-bold flex items-center gap-2"
+                                    >
+                                        <Plus size={16} /> Add Map Link
+                                    </button>
+                                </div>
+                                <p className="text-sm text-slate-500 mb-6 font-medium">Add Google Maps links here. They will automatically be converted to QR Codes with Mini logos for users to scan.</p>
+                                
+                                <div className="space-y-4">
+                                    {(editingEventData.maps_config || []).map((map, idx) => (
+                                        <div key={idx} className="flex gap-4 items-center bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm">
+                                            <div className="w-1/4">
+                                                <label className={LABEL_STYLE}>Group</label>
                                                 <input 
                                                     type="text" 
-                                                    value={extra.image_url || ''}
-                                                    onChange={(e) => updateExtraInfo(idx, 'image_url', e.target.value)}
-                                                    className="flex-grow px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-xs"
-                                                    placeholder="Image URL"
+                                                    placeholder="Day 1"
+                                                    value={map.groupName}
+                                                    onChange={(e) => {
+                                                        const newMaps = [...(editingEventData.maps_config || [])];
+                                                        newMaps[idx] = { ...newMaps[idx], groupName: e.target.value };
+                                                        setEditingEventData({...editingEventData, maps_config: newMaps});
+                                                    }}
+                                                    className={INPUT_STYLE}
                                                 />
-                                                <label className="cursor-pointer bg-slate-200 dark:bg-slate-700 p-2 rounded hover:bg-slate-300">
-                                                    <Upload size={14} />
-                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'image_url', idx, 'extra_info')} />
-                                                </label>
                                             </div>
+                                            <div className="w-1/3">
+                                                <label className={LABEL_STYLE}>Label</label>
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="e.g. Morning Route"
+                                                    value={map.label}
+                                                    onChange={(e) => {
+                                                        const newMaps = [...(editingEventData.maps_config || [])];
+                                                        newMaps[idx] = { ...newMaps[idx], label: e.target.value };
+                                                        setEditingEventData({...editingEventData, maps_config: newMaps});
+                                                    }}
+                                                    className={INPUT_STYLE}
+                                                />
+                                            </div>
+                                            <div className="flex-grow">
+                                                <label className={LABEL_STYLE}>Map URL</label>
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="https://..."
+                                                    value={map.url}
+                                                    onChange={(e) => {
+                                                        const newMaps = [...(editingEventData.maps_config || [])];
+                                                        newMaps[idx] = { ...newMaps[idx], url: e.target.value };
+                                                        setEditingEventData({...editingEventData, maps_config: newMaps});
+                                                    }}
+                                                    className={INPUT_STYLE}
+                                                />
+                                            </div>
+                                            <button 
+                                                onClick={() => {
+                                                    const newMaps = [...(editingEventData.maps_config || [])];
+                                                    newMaps.splice(idx, 1);
+                                                    setEditingEventData({...editingEventData, maps_config: newMaps});
+                                                }}
+                                                className="text-slate-400 hover:text-red-500 p-2 mt-6"
+                                            >
+                                                <Trash2 size={24} />
+                                            </button>
                                         </div>
-                                    </div>
-                                ))}
-
-                                <div className="flex gap-2 justify-center pt-2">
-                                    <button onClick={() => addExtraInfo('food')} className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold hover:bg-orange-200">+ Food</button>
-                                    <button onClick={() => addExtraInfo('racing')} className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold hover:bg-red-200">+ Racing</button>
-                                    <button onClick={() => addExtraInfo('roadtrip')} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold hover:bg-blue-200">+ Road Trip</button>
+                                    ))}
                                 </div>
+                            </div>
+
+                            {/* Part 2: Road Trip Info Text */}
+                            {renderExtraSection('roadtrip')}
+                        </div>
+                    )}
+
+                    {/* --- TAB: PREVIEW --- */}
+                    {editorTab === 'preview' && (
+                        <div className="animate-in fade-in slide-in-from-bottom-4 bg-slate-50 dark:bg-slate-950 p-6 rounded-2xl border border-slate-200 dark:border-slate-800">
+                            <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Eye className="text-mini-red"/> Event Summary Preview</h3>
+                            
+                            {/* Hero Preview */}
+                            <div className="relative h-48 w-full rounded-xl overflow-hidden mb-6">
+                                <img src={editingEventData.cover_image_url || 'https://picsum.photos/800/400'} className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 flex flex-col justify-end p-6 text-white">
+                                    <h1 className="text-2xl font-bold">{editingEventData.title || 'Event Title'}</h1>
+                                    <p className="text-sm opacity-90">{editingEventData.date} • {editingEventData.location_name}</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Details */}
+                                <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm">
+                                    <h4 className="font-bold text-sm text-slate-500 uppercase mb-2">Description</h4>
+                                    <p className="text-sm text-slate-700 dark:text-slate-300 line-clamp-4">{editingEventData.description}</p>
+                                </div>
+
+                                {/* Logistics Stats */}
+                                <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm space-y-2">
+                                    <h4 className="font-bold text-sm text-slate-500 uppercase mb-2">Logistics</h4>
+                                    <div className="flex justify-between text-sm">
+                                        <span>Hotels:</span> 
+                                        <span className="font-bold">{(editingEventData.hotel_info as any[])?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span>Parking Locations:</span> 
+                                        <span className="font-bold">{(editingEventData.parking_info as any[])?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span>Map Routes:</span> 
+                                        <span className="font-bold">{editingEventData.maps_config?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span>Itinerary Items:</span> 
+                                        <span className="font-bold">{editingItinerary.length}</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
                     
                     <div className="mt-8 flex justify-end gap-4 border-t border-slate-100 dark:border-slate-800 pt-6">
                         <button 
                             onClick={() => setIsEditingEvent(false)}
-                            className="px-6 py-2 rounded-lg font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors"
+                            className="px-8 py-3 rounded-xl font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors"
                         >
                             Cancel
                         </button>
                         <button 
                             onClick={saveEvent}
-                            className="px-8 py-2 bg-mini-red text-white rounded-lg font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-200 dark:shadow-none flex items-center gap-2"
+                            className="px-10 py-3 bg-mini-red text-white rounded-xl font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-200 dark:shadow-none flex items-center gap-2"
                         >
-                            <Save size={18} /> Save Event
+                            <Save size={20} /> Save Event
                         </button>
                     </div>
                 </motion.div>

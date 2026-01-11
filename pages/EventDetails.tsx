@@ -45,6 +45,7 @@ const mockDetailMeeting: Meeting = {
         cost: 'Included',
         security_info: '24/7 CCTV',
         image_url: 'https://picsum.photos/seed/parking/400/300',
+        map_url: 'https://goo.gl/maps/parking'
     }],
     extra_info: []
 }
@@ -148,6 +149,20 @@ const EventDetails: React.FC = () => {
       setExpandedMapGroups(prev => ({...prev, [group]: !prev[group]}));
   }
 
+  // QR Code Component with Logo Overlay
+  const MiniQRCode = ({ url, size }: { url: string, size: number }) => (
+      <div className="relative flex items-center justify-center bg-white p-2 rounded-xl border border-slate-100 shadow-sm" style={{ width: size + 20, height: size + 20 }}>
+          <QRCode size={size} value={url} viewBox={`0 0 256 256`} style={{ height: "auto", maxWidth: "100%", width: "100%" }} />
+          <div className="absolute bg-white p-1 rounded-full border-2 border-white shadow-sm flex items-center justify-center" style={{ width: size * 0.25, height: size * 0.25 }}>
+                <img 
+                    src={getAssetUrl('logos/mini-wings.png')} 
+                    alt="MINI"
+                    className="w-full h-full object-contain"
+                />
+          </div>
+      </div>
+  );
+
   if (loading) return <div className="pt-32 text-center dark:text-white">Loading...</div>;
   if (!meeting) return <div className="pt-32 text-center dark:text-white">Event not found</div>;
 
@@ -219,7 +234,7 @@ const EventDetails: React.FC = () => {
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                         <FileText className="text-mini-red" /> {t('about')}
                     </h2>
-                    <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-lg mb-8 whitespace-pre-line">
+                    <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-lg mb-8 whitespace-pre-line font-medium">
                         {meeting.description}
                     </p>
 
@@ -330,10 +345,8 @@ const EventDetails: React.FC = () => {
                                                 <div className="p-4 space-y-6 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
                                                     {(maps as MapConfig[]).map((mapItem, idx) => (
                                                         <div key={idx} className="flex flex-col items-center text-center">
-                                                            <div className="bg-white p-2 rounded-lg border border-slate-100 dark:border-slate-700 mb-2 shadow-sm">
-                                                                <QRCode size={100} style={{ height: "auto", maxWidth: "100%", width: "100%" }} value={mapItem.url} viewBox={`0 0 256 256`} />
-                                                            </div>
-                                                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm mb-1">{mapItem.label}</h4>
+                                                            <MiniQRCode url={mapItem.url} size={120} />
+                                                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm mt-3 mb-1">{mapItem.label}</h4>
                                                             <a href={mapItem.url} target="_blank" rel="noreferrer" className="text-xs font-bold text-mini-red hover:underline flex items-center gap-1">{t('openMap')} <ExternalLink size={10} /></a>
                                                         </div>
                                                     ))}
@@ -373,32 +386,42 @@ const EventDetails: React.FC = () => {
                 {hotels.map((hotel, idx) => (
                     <div key={idx} className="border-b border-slate-100 dark:border-slate-800 pb-8 last:border-0 last:pb-0">
                         <h3 className="text-2xl font-black text-slate-800 dark:text-white mb-2">{hotel.name}</h3>
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 mb-4">
-                             <div className="flex items-start gap-3 mb-2">
-                                 <MapPin className="text-mini-red shrink-0 mt-1" size={18} />
-                                 <p className="text-slate-700 dark:text-slate-300">{hotel.address}</p>
-                             </div>
-                             {hotel.map_url && <a href={hotel.map_url} target="_blank" rel="noreferrer" className="text-sm font-bold text-mini-red hover:underline ml-8 flex items-center gap-1">{t('openMap')} <ExternalLink size={12}/></a>}
+                        
+                        <div className="flex flex-col md:flex-row gap-4 mb-4">
+                            {/* Map Card */}
+                            <div className="flex-grow p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
+                                <div className="flex items-start gap-3 mb-2">
+                                    <MapPin className="text-mini-red shrink-0 mt-1" size={18} />
+                                    <p className="text-slate-700 dark:text-slate-300 font-medium">{hotel.address}</p>
+                                </div>
+                                {hotel.map_url && <a href={hotel.map_url} target="_blank" rel="noreferrer" className="text-sm font-bold text-mini-red hover:underline ml-8 flex items-center gap-1">{t('openMap')} <ExternalLink size={12}/></a>}
+                            </div>
+                            {/* QR Code */}
+                            {hotel.map_url && (
+                                <div className="shrink-0 flex items-center justify-center">
+                                    <MiniQRCode url={hotel.map_url} size={80} />
+                                </div>
+                            )}
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl text-center"><span className="block text-xs text-slate-500 uppercase">Single</span><span className="block font-bold dark:text-white">{hotel.price_single}</span></div>
-                            <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl text-center"><span className="block text-xs text-slate-500 uppercase">Double</span><span className="block font-bold dark:text-white">{hotel.price_double}</span></div>
+                            <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl text-center"><span className="block text-xs text-slate-500 uppercase font-bold">Single</span><span className="block font-bold dark:text-white text-lg">{hotel.price_single}</span></div>
+                            <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl text-center"><span className="block text-xs text-slate-500 uppercase font-bold">Double</span><span className="block font-bold dark:text-white text-lg">{hotel.price_double}</span></div>
                         </div>
 
                          {/* Contact Info */}
                         {hotel.contact && (
                             <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl">
                                 <h4 className="font-bold text-blue-800 dark:text-blue-300 text-xs uppercase mb-2">Contact Person</h4>
-                                <div className="text-sm space-y-1 text-slate-700 dark:text-slate-300">
-                                    <p className="font-bold">{hotel.contact.name}</p>
+                                <div className="text-sm space-y-1 text-slate-700 dark:text-slate-300 font-medium">
+                                    <p className="font-bold text-base">{hotel.contact.name}</p>
                                     {hotel.contact.email && <a href={`mailto:${hotel.contact.email}`} className="block hover:text-mini-red">{hotel.contact.email}</a>}
                                     {hotel.contact.phone && <a href={`tel:${hotel.contact.phone}`} className="block hover:text-mini-red">{hotel.contact.phone}</a>}
                                 </div>
                             </div>
                         )}
 
-                        <p className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-line mb-4">{hotel.description}</p>
+                        <p className="text-base text-slate-600 dark:text-slate-400 whitespace-pre-line mb-4 leading-relaxed font-medium">{hotel.description}</p>
                         
                         {hotel.booking_links && hotel.booking_links.map((link, i) => (
                              <a key={i} href={link.url} target="_blank" rel="noreferrer" className="block w-full text-center px-4 py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 mb-2">{link.label}</a>
@@ -413,20 +436,28 @@ const EventDetails: React.FC = () => {
             <div className="space-y-8">
                 {parking.map((park, idx) => (
                     <div key={idx} className="border-b border-slate-100 dark:border-slate-800 pb-8 last:border-0 last:pb-0">
-                        <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 mb-4">
-                             <h4 className="font-bold text-slate-900 dark:text-white mb-1">{park.location}</h4>
-                             <p className="text-slate-600 dark:text-slate-300 text-sm">Cost: <span className="font-bold">{park.cost}</span></p>
+                        <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 mb-4 flex justify-between items-start gap-4">
+                             <div>
+                                 <h4 className="font-bold text-slate-900 dark:text-white mb-1 text-lg">{park.location}</h4>
+                                 <p className="text-slate-600 dark:text-slate-300 text-base font-medium">Cost: <span className="font-bold">{park.cost}</span></p>
+                             </div>
+                             {/* QR Code */}
+                             {park.map_url && (
+                                <div className="shrink-0">
+                                    <MiniQRCode url={park.map_url} size={60} />
+                                </div>
+                             )}
                         </div>
-                        <p className="text-sm text-slate-700 dark:text-slate-300 mb-4 bg-red-50 dark:bg-red-900/10 p-3 rounded-lg border border-red-100 dark:border-red-900/30">{park.security_info}</p>
+                        <p className="text-sm text-slate-700 dark:text-slate-300 mb-4 bg-red-50 dark:bg-red-900/10 p-4 rounded-lg border border-red-100 dark:border-red-900/30 font-medium">{park.security_info}</p>
                         
                         {park.apps && park.apps.length > 0 && (
                             <div className="flex gap-2 mb-4 flex-wrap">
                                 {park.apps.map((app, i) => (
-                                     <span key={i} className="px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded-full text-xs font-bold">{app.label}</span>
+                                     <span key={i} className="px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded-full text-xs font-bold text-slate-700 dark:text-slate-300">{app.label}</span>
                                 ))}
                             </div>
                         )}
-                        {park.map_url && <a href={park.map_url} target="_blank" rel="noreferrer" className="block text-center w-full py-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl font-bold text-mini-red hover:border-mini-red">{t('openMap')}</a>}
+                        {park.map_url && <a href={park.map_url} target="_blank" rel="noreferrer" className="block text-center w-full py-3 border-2 border-slate-200 dark:border-slate-700 rounded-xl font-bold text-mini-red hover:border-mini-red text-lg">{t('openMap')}</a>}
                     </div>
                 ))}
             </div>
@@ -437,7 +468,7 @@ const EventDetails: React.FC = () => {
              {selectedExtraInfo && (
                  <div className="space-y-4">
                      {/* ... (Existing Extra Info Logic) ... */}
-                      <p className="text-slate-600 dark:text-slate-300 whitespace-pre-line">{selectedExtraInfo.content}</p>
+                      <p className="text-slate-600 dark:text-slate-300 whitespace-pre-line text-lg font-medium leading-relaxed">{selectedExtraInfo.content}</p>
                  </div>
              )}
         </Modal>
