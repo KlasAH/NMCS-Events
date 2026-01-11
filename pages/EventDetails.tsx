@@ -347,7 +347,18 @@ const EventDetails: React.FC = () => {
                                                         <div key={idx} className="flex flex-col items-center text-center">
                                                             <MiniQRCode url={mapItem.url} size={120} />
                                                             <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm mt-3 mb-1">{mapItem.label}</h4>
-                                                            <a href={mapItem.url} target="_blank" rel="noreferrer" className="text-xs font-bold text-mini-red hover:underline flex items-center gap-1">{t('openMap')} <ExternalLink size={10} /></a>
+                                                            
+                                                            {/* UPDATED: Button under QR Code */}
+                                                            <a 
+                                                                href={mapItem.url} 
+                                                                target="_blank" 
+                                                                rel="noreferrer" 
+                                                                className="mt-3 w-full flex items-center justify-center gap-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-mini-red hover:text-white hover:border-mini-red dark:hover:bg-mini-red dark:hover:text-white text-slate-700 dark:text-slate-300 px-4 py-2.5 rounded-xl font-bold text-sm transition-all shadow-sm group"
+                                                            >
+                                                                <Map size={16} /> 
+                                                                <span>{t('openMap')}</span>
+                                                                <ExternalLink size={12} className="opacity-50 ml-1 group-hover:opacity-100" />
+                                                            </a>
                                                         </div>
                                                     ))}
                                                 </div>
