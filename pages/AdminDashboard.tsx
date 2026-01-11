@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet, ToggleLeft, ToggleRight, UserPlus, AlertTriangle, Image, List, TestTube } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, HotelDetails, ParkingDetails, ItineraryItem, MapConfig } from '../types';
 import { supabase, isDemoMode, finalUrl, finalKey, STORAGE_BUCKET } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -13,6 +13,32 @@ import { format } from 'date-fns';
 import Modal from '../components/Modal';
 
 const MASTER_ADMIN_EMAIL = 'klas.ahlman@gmail.com';
+
+// Switch Component for Settings
+const ToggleSwitch = ({ label, description, checked, onChange, icon: Icon }: { label: string, description: string, checked: boolean, onChange: () => void, icon: any }) => (
+    <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm transition-all hover:shadow-md">
+        <div className="flex items-start gap-4">
+            <div className={`p-3 rounded-lg ${checked ? 'bg-mini-red/10 text-mini-red' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'}`}>
+                <Icon size={24} />
+            </div>
+            <div>
+                <h4 className="font-bold text-slate-900 dark:text-white text-base">{label}</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-[200px] sm:max-w-xs">{description}</p>
+            </div>
+        </div>
+        <button 
+            onClick={onChange}
+            className={`w-14 h-8 rounded-full p-1 transition-colors duration-300 ease-in-out ${checked ? 'bg-mini-red' : 'bg-slate-300 dark:bg-slate-600'}`}
+        >
+            <motion.div 
+                className="bg-white w-6 h-6 rounded-full shadow-md"
+                layout
+                transition={{ type: "spring", stiffness: 700, damping: 30 }}
+                animate={{ x: checked ? 24 : 0 }}
+            />
+        </button>
+    </div>
+);
 
 const AdminDashboard: React.FC = () => {
   // 1. CONTEXT HOOKS
@@ -40,7 +66,14 @@ const AdminDashboard: React.FC = () => {
   });
 
   // Settings State
-  const [autoLogoutHours, setAutoLogoutHours] = useState('8');
+  const [appSettings, setAppSettings] = useState({
+      auto_logout_hours: '8',
+      public_registration: 'true',
+      maintenance_mode: 'false',
+      allow_member_uploads: 'false',
+      enable_waitlist: 'true',
+      beta_features: 'false'
+  });
   const [settingsStatus, setSettingsStatus] = useState('');
 
   // Editing State (Events)
@@ -99,16 +132,23 @@ const AdminDashboard: React.FC = () => {
       fetchData();
   }, [selectedEventId, activeTab, isAdmin]);
 
-  // Fetch Settings (Master Admin)
+  // Fetch Settings (General)
   useEffect(() => {
-    if (activeTab === 'settings' && session?.user?.email === MASTER_ADMIN_EMAIL && !isDemoMode) {
+    if (activeTab === 'settings' && !isDemoMode) {
         const fetchSettings = async () => {
-            const { data } = await supabase.from('app_settings').select('value').eq('key', 'auto_logout_hours').single();
-            if (data) setAutoLogoutHours(data.value);
+            const { data } = await supabase.from('app_settings').select('*');
+            if (data) {
+                const newSettings = { ...appSettings };
+                data.forEach(row => {
+                    // @ts-ignore
+                    if (newSettings[row.key] !== undefined) newSettings[row.key] = row.value;
+                });
+                setAppSettings(newSettings);
+            }
         }
         fetchSettings();
     }
-  }, [activeTab, session]);
+  }, [activeTab]);
 
   // --- STYLES ---
   const INPUT_STYLE = "w-full px-5 py-4 rounded-xl border-2 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-lg font-bold text-slate-900 dark:text-white shadow-sm focus:border-mini-red focus:ring-4 focus:ring-red-500/10 transition-all outline-none placeholder:text-slate-400";
@@ -166,25 +206,36 @@ const AdminDashboard: React.FC = () => {
       }
   }
 
-  const handleSaveSettings = async () => {
+  const handleSaveSettings = async (specificKey?: string, specificValue?: string) => {
       if (isDemoMode) {
           setSettingsStatus('Saved (Demo)');
           setTimeout(() => setSettingsStatus(''), 2000);
           return;
       }
       
+      const key = specificKey || 'auto_logout_hours';
+      const value = specificValue || appSettings.auto_logout_hours;
+
       const { error } = await supabase.from('app_settings').upsert({
-          key: 'auto_logout_hours',
-          value: autoLogoutHours,
+          key,
+          value,
           updated_at: new Date().toISOString()
       });
       
       if(error) setSettingsStatus('Error: ' + error.message);
       else {
-          setSettingsStatus('Settings Saved!');
+          setSettingsStatus('Saved!');
           setTimeout(() => setSettingsStatus(''), 2000);
       }
   }
+
+  const handleToggleSetting = (key: keyof typeof appSettings) => {
+      const currentVal = appSettings[key] === 'true';
+      const newVal = String(!currentVal);
+      
+      setAppSettings(prev => ({ ...prev, [key]: newVal }));
+      handleSaveSettings(key, newVal);
+  };
 
   const startEditEvent = async (evt?: Meeting) => {
       setEditorTab('general');
@@ -543,41 +594,87 @@ const AdminDashboard: React.FC = () => {
                         <div className="space-y-8">
                             <h2 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">Settings & Users</h2>
                             
-                            {/* MASTER ADMIN SECTION */}
-                            {session?.user.email === MASTER_ADMIN_EMAIL && (
-                                <div className="p-6 bg-slate-100 dark:bg-slate-800 rounded-2xl border-2 border-slate-200 dark:border-slate-700">
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <Lock size={20} className="text-mini-red" />
-                                        <h3 className="text-lg font-bold">Master Admin Controls</h3>
-                                    </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* SYSTEM SECTION */}
+                                <div className="space-y-4">
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2"><Lock size={14} /> Access Control</h3>
                                     
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className={LABEL_STYLE}>Admin Auto-Logout Timer (Hours)</label>
+                                    <ToggleSwitch 
+                                        label="Public Registration" 
+                                        description="Allow new users to sign up freely."
+                                        checked={appSettings.public_registration === 'true'}
+                                        onChange={() => handleToggleSetting('public_registration')}
+                                        icon={UserPlus}
+                                    />
+
+                                    <ToggleSwitch 
+                                        label="Maintenance Mode" 
+                                        description="Display 'Under Construction' to non-admins."
+                                        checked={appSettings.maintenance_mode === 'true'}
+                                        onChange={() => handleToggleSetting('maintenance_mode')}
+                                        icon={AlertTriangle}
+                                    />
+                                    
+                                     {session?.user.email === MASTER_ADMIN_EMAIL && (
+                                        <div className="p-6 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                                            <label className={LABEL_STYLE}>Admin Auto-Logout (Hours)</label>
                                             <div className="flex gap-4">
                                                 <input 
                                                     type="number" 
-                                                    value={autoLogoutHours}
-                                                    onChange={(e) => setAutoLogoutHours(e.target.value)}
+                                                    value={appSettings.auto_logout_hours}
+                                                    onChange={(e) => setAppSettings(prev => ({...prev, auto_logout_hours: e.target.value}))}
                                                     className={INPUT_STYLE}
                                                 />
                                                 <button 
-                                                    onClick={handleSaveSettings}
+                                                    onClick={() => handleSaveSettings('auto_logout_hours', appSettings.auto_logout_hours)}
                                                     className="bg-mini-black dark:bg-white text-white dark:text-black px-6 rounded-xl font-bold whitespace-nowrap"
                                                 >
-                                                    Save Setting
+                                                    Save
                                                 </button>
                                             </div>
-                                            <p className="text-sm text-slate-500 mt-2">Default: 8 hours. Applies to all board members.</p>
-                                            {settingsStatus && <p className="text-sm font-bold text-green-600 mt-2">{settingsStatus}</p>}
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
-                            )}
 
-                            <div className="text-center text-slate-400 py-10 border border-dashed border-slate-300 rounded-xl">
-                                Other user management settings (Global Password Reset, Role Management) would go here.
+                                {/* FEATURES SECTION */}
+                                <div className="space-y-4">
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2"><Star size={14} /> Features</h3>
+                                    
+                                    <ToggleSwitch 
+                                        label="Member Gallery Uploads" 
+                                        description="Allow members to upload photos to event galleries."
+                                        checked={appSettings.allow_member_uploads === 'true'}
+                                        onChange={() => handleToggleSetting('allow_member_uploads')}
+                                        icon={Image}
+                                    />
+
+                                    <ToggleSwitch 
+                                        label="Automatic Waitlists" 
+                                        description="Enable waitlists for full events automatically."
+                                        checked={appSettings.enable_waitlist === 'true'}
+                                        onChange={() => handleToggleSetting('enable_waitlist')}
+                                        icon={List}
+                                    />
+
+                                    <ToggleSwitch 
+                                        label="Beta Features" 
+                                        description="Enable experimental UI components for testing."
+                                        checked={appSettings.beta_features === 'true'}
+                                        onChange={() => handleToggleSetting('beta_features')}
+                                        icon={TestTube}
+                                    />
+                                </div>
                             </div>
+                            
+                            {settingsStatus && (
+                                <motion.div 
+                                    initial={{ opacity: 0, y: 10 }} 
+                                    animate={{ opacity: 1, y: 0 }} 
+                                    className="fixed bottom-6 right-6 bg-green-500 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2"
+                                >
+                                    <CheckCircle size={20} /> {settingsStatus}
+                                </motion.div>
+                            )}
                         </div>
                     )}
                 </motion.div>
