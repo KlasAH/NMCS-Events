@@ -725,6 +725,141 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         </div>
                     )}
+
+                    {editorTab === 'hotels' && (
+                        <div className="space-y-8 animate-in fade-in">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="font-bold text-xl flex items-center gap-2"><Building2 size={20}/> Hotels</h3>
+                                <button onClick={() => addToList('hotel_info', { id: `h-${Date.now()}`, name: '', address: '', map_url: '', price_single: '', price_double: '', description: '', booking_links: [], contact: {name: '', email: '', phone: ''} })} className={`${BUTTON_STYLE} bg-mini-black dark:bg-white text-white dark:text-black`}>+ Add Hotel</button>
+                            </div>
+                            
+                            {(editingEventData.hotel_info as HotelDetails[] || []).map((hotel, idx) => (
+                                <div key={idx} className="bg-slate-50 dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 relative mb-6">
+                                    <button onClick={() => removeFromList('hotel_info', idx)} className="absolute top-6 right-6 text-red-500 hover:bg-red-50 p-2 rounded"><Trash2 size={20}/></button>
+                                    
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                        <div>
+                                            <label className={LABEL_STYLE}>Hotel Name</label>
+                                            <input value={hotel.name} onChange={e => updateList('hotel_info', idx, 'name', e.target.value)} className={INPUT_STYLE} placeholder="Hotel Name" />
+                                        </div>
+                                        <div>
+                                            <label className={LABEL_STYLE}>Address</label>
+                                            <input value={hotel.address} onChange={e => updateList('hotel_info', idx, 'address', e.target.value)} className={INPUT_STYLE} placeholder="Address" />
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="mb-4">
+                                        <label className={LABEL_STYLE}>Map URL</label>
+                                        <input value={hotel.map_url} onChange={e => updateList('hotel_info', idx, 'map_url', e.target.value)} className={INPUT_STYLE} placeholder="https://maps.google.com..." />
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div>
+                                            <label className={LABEL_STYLE}>Price Single</label>
+                                            <input value={hotel.price_single} onChange={e => updateList('hotel_info', idx, 'price_single', e.target.value)} className={INPUT_STYLE} placeholder="e.g. 1500 SEK" />
+                                        </div>
+                                        <div>
+                                            <label className={LABEL_STYLE}>Price Double</label>
+                                            <input value={hotel.price_double} onChange={e => updateList('hotel_info', idx, 'price_double', e.target.value)} className={INPUT_STYLE} placeholder="e.g. 1800 SEK" />
+                                        </div>
+                                    </div>
+
+                                    <div className="mb-4">
+                                        <label className={LABEL_STYLE}>Description</label>
+                                        <textarea value={hotel.description} onChange={e => updateList('hotel_info', idx, 'description', e.target.value)} className={INPUT_STYLE} rows={3} placeholder="Room details, breakfast info..." />
+                                    </div>
+
+                                    <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-4">
+                                        <h4 className="font-bold text-sm mb-3">Contact Person</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <input value={hotel.contact?.name || ''} onChange={e => updateList('hotel_info', idx, 'contact.name', e.target.value)} className={`${INPUT_STYLE} text-sm`} placeholder="Name" />
+                                            <input value={hotel.contact?.email || ''} onChange={e => updateList('hotel_info', idx, 'contact.email', e.target.value)} className={`${INPUT_STYLE} text-sm`} placeholder="Email" />
+                                            <input value={hotel.contact?.phone || ''} onChange={e => updateList('hotel_info', idx, 'contact.phone', e.target.value)} className={`${INPUT_STYLE} text-sm`} placeholder="Phone" />
+                                        </div>
+                                    </div>
+
+                                    <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 p-4 rounded-xl text-center bg-white dark:bg-slate-900">
+                                        <label className={LABEL_STYLE}>Hotel Image</label>
+                                        <div className="flex flex-col items-center">
+                                            {hotel.image_url ? (
+                                                <img src={hotel.image_url} className="h-32 object-cover rounded-lg mb-2" />
+                                            ) : <div className="h-32 w-full bg-slate-100 dark:bg-slate-800 rounded-lg mb-2 flex items-center justify-center text-slate-400 text-xs">No Image</div>}
+                                            <label className="cursor-pointer text-blue-600 font-bold hover:underline text-sm">
+                                                {uploadingImage ? 'Uploading...' : 'Upload Photo'}
+                                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => updateList('hotel_info', idx, 'image_url', url))} />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            {(editingEventData.hotel_info as HotelDetails[] || []).length === 0 && <p className="text-center text-slate-400 italic">No hotels added.</p>}
+                        </div>
+                    )}
+
+                    {editorTab === 'parking' && (
+                        <div className="space-y-8 animate-in fade-in">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="font-bold text-xl flex items-center gap-2"><Car size={20}/> Parking</h3>
+                                <button onClick={() => addToList('parking_info', { id: `p-${Date.now()}`, location: '', cost: '', security_info: '', map_url: '', apps: [] })} className={`${BUTTON_STYLE} bg-mini-black dark:bg-white text-white dark:text-black`}>+ Add Parking</button>
+                            </div>
+
+                            {(editingEventData.parking_info as ParkingDetails[] || []).map((park, idx) => (
+                                <div key={idx} className="bg-slate-50 dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 relative mb-6">
+                                    <button onClick={() => removeFromList('parking_info', idx)} className="absolute top-6 right-6 text-red-500 hover:bg-red-50 p-2 rounded"><Trash2 size={20}/></button>
+                                    
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                        <div>
+                                            <label className={LABEL_STYLE}>Location Name</label>
+                                            <input value={park.location} onChange={e => updateList('parking_info', idx, 'location', e.target.value)} className={INPUT_STYLE} placeholder="e.g. Garage Central" />
+                                        </div>
+                                        <div>
+                                            <label className={LABEL_STYLE}>Cost</label>
+                                            <input value={park.cost} onChange={e => updateList('parking_info', idx, 'cost', e.target.value)} className={INPUT_STYLE} placeholder="e.g. 200 SEK / day" />
+                                        </div>
+                                    </div>
+
+                                    <div className="mb-4">
+                                        <label className={LABEL_STYLE}>Map URL</label>
+                                        <input value={park.map_url} onChange={e => updateList('parking_info', idx, 'map_url', e.target.value)} className={INPUT_STYLE} placeholder="https://maps.google.com..." />
+                                    </div>
+
+                                    <div className="mb-4">
+                                        <label className={LABEL_STYLE}>Security Info</label>
+                                        <input value={park.security_info} onChange={e => updateList('parking_info', idx, 'security_info', e.target.value)} className={INPUT_STYLE} placeholder="e.g. Locked gate at night" />
+                                    </div>
+
+                                    <div className="mb-4">
+                                        <label className={LABEL_STYLE}>Parking Apps</label>
+                                        <div className="flex gap-2 flex-wrap">
+                                            {['EasyPark', 'Parkster', 'MobilPark'].map(app => (
+                                                <button 
+                                                    key={app}
+                                                    onClick={() => toggleParkingApp(idx, app)}
+                                                    className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${park.apps?.some(a => a.label === app) ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-white border-slate-200 text-slate-500'}`}
+                                                >
+                                                    {app}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 p-4 rounded-xl text-center bg-white dark:bg-slate-900">
+                                        <label className={LABEL_STYLE}>Parking Image</label>
+                                        <div className="flex flex-col items-center">
+                                            {park.image_url ? (
+                                                <img src={park.image_url} className="h-32 object-cover rounded-lg mb-2" />
+                                            ) : <div className="h-32 w-full bg-slate-100 dark:bg-slate-800 rounded-lg mb-2 flex items-center justify-center text-slate-400 text-xs">No Image</div>}
+                                            <label className="cursor-pointer text-blue-600 font-bold hover:underline text-sm">
+                                                {uploadingImage ? 'Uploading...' : 'Upload Photo'}
+                                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => updateList('parking_info', idx, 'image_url', url))} />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            {(editingEventData.parking_info as ParkingDetails[] || []).length === 0 && <p className="text-center text-slate-400 italic">No parking info added.</p>}
+                        </div>
+                    )}
                     
                     {editorTab === 'itinerary' && (
                         <div className="space-y-8 animate-in fade-in">
@@ -953,7 +1088,28 @@ const AdminDashboard: React.FC = () => {
                          </div>
                     )}
                     
-                    {/* ... rest of tabs ... */}
+                    {editorTab === 'preview' && (
+                        <div className="space-y-4 animate-in fade-in">
+                            <div className="bg-slate-100 dark:bg-slate-800 p-8 rounded-2xl text-center">
+                                <h3 className="text-xl font-bold mb-2">Preview Mode</h3>
+                                <p className="text-slate-500 mb-6">This shows how the event card will look on the home page.</p>
+                                <div className="max-w-sm mx-auto bg-white dark:bg-slate-900 rounded-2xl overflow-hidden shadow-lg border-b-4 border-mini-red">
+                                    <div className="h-48 relative">
+                                        <img src={editingEventData.cover_image_url || "https://picsum.photos/800/600"} className="w-full h-full object-cover" />
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
+                                        <div className="absolute bottom-4 left-4 text-white text-left">
+                                            <div className="text-xs font-bold uppercase mb-1">{editingEventData.date}</div>
+                                            <div className="font-black text-xl leading-tight">{editingEventData.title || "Event Title"}</div>
+                                        </div>
+                                    </div>
+                                    <div className="p-4 text-left">
+                                        <div className="text-sm text-slate-500 mb-2 flex items-center gap-1"><MapPin size={14} className="text-mini-red"/> {editingEventData.location_name || "Location"}</div>
+                                        <p className="text-sm text-slate-600 dark:text-slate-300 line-clamp-3">{editingEventData.description || "Description..."}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between sticky bottom-0 bg-white dark:bg-slate-900 z-10">
                         <button onClick={() => setIsEditingEvent(false)} className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">Cancel</button>
