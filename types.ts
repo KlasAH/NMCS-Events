@@ -1,5 +1,4 @@
 
-
 export type Json =
   | string
   | number
@@ -80,6 +79,10 @@ export interface Meeting {
   parking_info?: ParkingDetails | ParkingDetails[];
   extra_info?: ExtraInfoSection[];
   custom_data?: Record<string, string | number | boolean>;
+  
+  // NEW: Photos
+  google_photos_url?: string;
+  gallery_images?: string[]; // Array of public URLs
 }
 
 export interface ItineraryItem {

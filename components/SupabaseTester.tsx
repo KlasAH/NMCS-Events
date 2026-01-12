@@ -1,5 +1,4 @@
 
-
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -106,6 +105,10 @@ ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS status TEXT CHECK (status I
 -- 9. FEATURE: Itinerary Sorting & Types
 ALTER TABLE public.itinerary_items ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 ALTER TABLE public.itinerary_items ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'activity';
+
+-- 10. FEATURE: Photos and Gallery
+ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS google_photos_url TEXT;
+ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS gallery_images JSONB DEFAULT '[]'::jsonb;
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
@@ -511,6 +514,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks.</li>
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
                         <li><strong>NEW: Publish Status:</strong> Added 'status' column to meetings table.</li>
+                        <li><strong>NEW: Photos:</strong> Added google_photos_url and gallery_images to meetings table.</li>
                     </ul>
                 </div>
 

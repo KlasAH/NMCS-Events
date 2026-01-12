@@ -1,11 +1,10 @@
 
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet, ToggleLeft, ToggleRight, UserPlus, AlertTriangle, Image, List, TestTube, Check, Share, Info, Palette, ImageIcon, Download, Circle, Square, GripVertical, ArrowUpDown, ListOrdered } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet, ToggleLeft, ToggleRight, UserPlus, AlertTriangle, Image, List, TestTube, Check, Share, Info, Palette, ImageIcon, Download, Circle, Square, GripVertical, ArrowUpDown, ListOrdered, Camera } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, HotelDetails, ParkingDetails, ItineraryItem, MapConfig, LinkItem } from '../types';
 import { supabase, isDemoMode, finalUrl, finalKey, STORAGE_BUCKET } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -167,7 +166,7 @@ const AdminDashboard: React.FC = () => {
 
   // Editing State (Events)
   const [isEditingEvent, setIsEditingEvent] = useState(false);
-  const [editorTab, setEditorTab] = useState<'general' | 'itinerary' | 'hotels' | 'parking' | 'maps' | 'trackday' | 'preview'>('general');
+  const [editorTab, setEditorTab] = useState<'general' | 'itinerary' | 'hotels' | 'parking' | 'maps' | 'trackday' | 'photos' | 'preview'>('general');
   const [editingEventData, setEditingEventData] = useState<Partial<Meeting>>({});
   const [editingItinerary, setEditingItinerary] = useState<ItineraryItem[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -359,6 +358,8 @@ const AdminDashboard: React.FC = () => {
           if (eventData.parking_info && !Array.isArray(eventData.parking_info)) eventData.parking_info = [eventData.parking_info];
           if (!eventData.extra_info) eventData.extra_info = [];
           if (!eventData.maps_config) eventData.maps_config = [];
+          // Fix gallery if null
+          if (!eventData.gallery_images) eventData.gallery_images = [];
           
           setEditingEventData(eventData);
 
@@ -379,7 +380,8 @@ const AdminDashboard: React.FC = () => {
               maps_config: [], 
               hotel_info: [], 
               parking_info: [], 
-              extra_info: []
+              extra_info: [],
+              gallery_images: []
           });
           setEditingItinerary([]);
       }
@@ -408,6 +410,46 @@ const AdminDashboard: React.FC = () => {
         callback(publicUrlData.publicUrl);
     } catch (err: any) { alert('Upload failed: ' + err.message); } 
     finally { setUploadingImage(false); }
+  };
+
+  // --- MULTI IMAGE UPLOAD FOR GALLERY ---
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0) return;
+      const files = Array.from(e.target.files);
+      setUploadingImage(true);
+      
+      const year = new Date().getFullYear();
+      const eventSlug = editingEventData.title ? editingEventData.title.toLowerCase().replace(/[^a-z0-9]/g, '-') : 'untitled';
+      
+      const uploadPromises = files.map(async (file) => {
+          const path = `event/${year}/${eventSlug}/gallery/${Date.now()}_${file.name.replace(/\s/g, '_')}`;
+          if (isDemoMode) return "https://picsum.photos/400/300?random=" + Math.random();
+          
+          const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file);
+          if (error) throw error;
+          const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+          return data.publicUrl;
+      });
+
+      try {
+          const urls = await Promise.all(uploadPromises);
+          setEditingEventData(prev => ({
+              ...prev,
+              gallery_images: [...(prev.gallery_images || []), ...urls]
+          }));
+      } catch (err: any) {
+          alert('One or more images failed to upload: ' + err.message);
+      } finally {
+          setUploadingImage(false);
+      }
+  };
+
+  const removeGalleryImage = (index: number) => {
+      setEditingEventData(prev => {
+          const newGallery = [...(prev.gallery_images || [])];
+          newGallery.splice(index, 1);
+          return { ...prev, gallery_images: newGallery };
+      });
   };
 
   // --- LIST MANIPULATION HELPERS ---
@@ -676,6 +718,7 @@ const AdminDashboard: React.FC = () => {
                             {id: 'parking', label: 'Parking'},
                             {id: 'itinerary', label: 'Itinerary & Info'},
                             {id: 'trackday', label: 'Track Day'},
+                            {id: 'photos', label: 'Photos & Gallery'},
                             {id: 'preview', label: 'Preview'},
                             {id: 'maps', label: 'Maps & QR'},
                         ].map(tab => (
@@ -726,6 +769,69 @@ const AdminDashboard: React.FC = () => {
                         </div>
                     )}
 
+                    {editorTab === 'photos' && (
+                        <div className="space-y-8 animate-in fade-in">
+                            {/* Google Photos Link */}
+                            <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
+                                <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                                    <Image size={20} className="text-mini-red" /> Google Photos Album
+                                </h3>
+                                <div className="space-y-4">
+                                    <p className="text-sm text-slate-500">
+                                        Paste a link to a Google Photos album (e.g., https://photos.app.goo.gl/...). 
+                                        This will show a card in the app allowing users to open the full album.
+                                    </p>
+                                    <input 
+                                        value={editingEventData.google_photos_url || ''} 
+                                        onChange={e => setEditingEventData({...editingEventData, google_photos_url: e.target.value})} 
+                                        placeholder="https://photos.app.goo.gl/xxxxxx" 
+                                        className={INPUT_STYLE} 
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Internal Gallery */}
+                            <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
+                                <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                                    <Camera size={20} className="text-mini-red" /> In-App Gallery Highlights
+                                </h3>
+                                <div className="space-y-4">
+                                    <p className="text-sm text-slate-500">
+                                        Upload specific photos here to display directly inside the app. 
+                                        Good for highlighting the best shots without forcing users to leave the app.
+                                    </p>
+                                    
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                                        {editingEventData.gallery_images?.map((url, idx) => (
+                                            <div key={idx} className="relative aspect-square group">
+                                                <img src={url} className="w-full h-full object-cover rounded-xl" />
+                                                <button 
+                                                    onClick={() => removeGalleryImage(idx)}
+                                                    className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        
+                                        <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl cursor-pointer hover:border-mini-red transition-colors bg-white dark:bg-slate-900">
+                                            {uploadingImage ? (
+                                                <div className="animate-spin text-mini-red"><RefreshCw size={24}/></div>
+                                            ) : (
+                                                <>
+                                                    <Plus size={24} className="text-slate-400 mb-2"/>
+                                                    <span className="text-xs font-bold text-slate-500">Upload</span>
+                                                </>
+                                            )}
+                                            <input type="file" multiple accept="image/*" className="hidden" onChange={handleGalleryUpload} />
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ... (Keep existing hotel, parking, itinerary tabs) ... */}
                     {editorTab === 'hotels' && (
                         <div className="space-y-8 animate-in fade-in">
                             <div className="flex justify-between items-center mb-4">

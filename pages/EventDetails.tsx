@@ -1,5 +1,4 @@
 
-
 import React, { useEffect, useState, useMemo } from 'react';
 // @ts-ignore
 import { useParams, Link } from 'react-router-dom';
@@ -8,7 +7,7 @@ import { Meeting, ExtraInfoSection, MapConfig, HotelDetails, ParkingDetails } fr
 import Itinerary from '../components/Itinerary';
 import Modal from '../components/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink, Download, UserPlus, CheckCircle, Mail, User, Phone, MessageSquare, Loader2 } from 'lucide-react';
+import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink, Download, UserPlus, CheckCircle, Mail, User, Phone, MessageSquare, Loader2, Image, Camera } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { format } from 'date-fns';
 import { useLanguage } from '../context/LanguageContext';
@@ -48,7 +47,9 @@ const mockDetailMeeting: Meeting = {
         image_url: 'https://picsum.photos/seed/parking/400/300',
         map_url: 'https://goo.gl/maps/parking'
     }],
-    extra_info: []
+    extra_info: [],
+    google_photos_url: 'https://photos.app.goo.gl/demo',
+    gallery_images: ['https://picsum.photos/seed/car1/800/600', 'https://picsum.photos/seed/car2/800/600', 'https://picsum.photos/seed/car3/800/600']
 }
 
 const EventDetails: React.FC = () => {
@@ -60,6 +61,7 @@ const EventDetails: React.FC = () => {
   // Modals for Lists
   const [showHotelModal, setShowHotelModal] = useState(false);
   const [showParkingModal, setShowParkingModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   
   // Selected Item Details
   const [selectedExtraInfo, setSelectedExtraInfo] = useState<ExtraInfoSection | null>(null);
@@ -195,6 +197,7 @@ const EventDetails: React.FC = () => {
 
   const hotels = getHotels();
   const parking = getParking();
+  const hasPhotos = meeting.google_photos_url || (meeting.gallery_images && meeting.gallery_images.length > 0);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-20 transition-colors">
@@ -343,6 +346,60 @@ const EventDetails: React.FC = () => {
                     </div>
                 </motion.div>
 
+                {/* PHOTOS CARD (NEW) */}
+                {hasPhotos && (
+                    <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xl shadow-slate-200/50 dark:shadow-none transition-colors">
+                        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+                            <Camera className="text-mini-red" /> Photos & Gallery
+                        </h2>
+                        
+                        {meeting.google_photos_url && (
+                            <a 
+                                href={meeting.google_photos_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block w-full mb-8 group"
+                            >
+                                <div className="p-6 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 text-white shadow-lg relative overflow-hidden transition-transform group-hover:scale-[1.02]">
+                                    <div className="relative z-10 flex items-center justify-between">
+                                        <div className="flex items-center gap-4">
+                                            <div className="p-3 bg-white/20 rounded-full backdrop-blur-sm">
+                                                <Image size={32} />
+                                            </div>
+                                            <div>
+                                                <div className="font-black text-xl">Google Photos Album</div>
+                                                <div className="text-white/80 text-sm font-medium">View full high-res collection</div>
+                                            </div>
+                                        </div>
+                                        <ExternalLink className="text-white/80 group-hover:text-white" />
+                                    </div>
+                                    <div className="absolute -right-10 -bottom-10 opacity-20 rotate-12">
+                                        <Image size={150} />
+                                    </div>
+                                </div>
+                            </a>
+                        )}
+
+                        {meeting.gallery_images && meeting.gallery_images.length > 0 && (
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Event Highlights</h3>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                    {meeting.gallery_images.map((url, idx) => (
+                                        <button 
+                                            key={idx}
+                                            onClick={() => setSelectedImage(url)}
+                                            className="relative aspect-square rounded-xl overflow-hidden group shadow-sm hover:shadow-md transition-all"
+                                        >
+                                            <img src={url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" />
+                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </motion.div>
+                )}
+
                 {/* Itinerary Card */}
                 <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-xl shadow-slate-200/50 dark:shadow-none transition-colors">
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
@@ -399,6 +456,15 @@ const EventDetails: React.FC = () => {
                 </motion.div>
             </div>
         </div>
+
+        {/* LIGHTBOX MODAL FOR GALLERY */}
+        <Modal isOpen={!!selectedImage} onClose={() => setSelectedImage(null)} title="Photo">
+            {selectedImage && (
+                <div className="flex justify-center items-center">
+                    <img src={selectedImage} className="max-w-full max-h-[80vh] rounded-lg shadow-lg" />
+                </div>
+            )}
+        </Modal>
 
         {/* REGISTRATION MODAL */}
         <Modal isOpen={showRegisterModal} onClose={() => { if(regStatus !== 'submitting') setShowRegisterModal(false); }} title={t('joinEvent')}>
