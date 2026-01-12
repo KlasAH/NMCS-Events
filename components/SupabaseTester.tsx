@@ -102,6 +102,10 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
 
 -- 8. FEATURE: Publish Status
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('draft', 'published')) DEFAULT 'draft';
+
+-- 9. FEATURE: Itinerary Sorting & Types
+ALTER TABLE public.itinerary_items ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
+ALTER TABLE public.itinerary_items ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'activity';
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {

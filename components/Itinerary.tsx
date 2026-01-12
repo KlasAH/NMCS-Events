@@ -1,8 +1,9 @@
 
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { ItineraryItem } from '../types';
-import { Clock, Info, ChevronDown, ChevronRight, MapPin } from 'lucide-react';
+import { Clock, Info, ChevronDown, ChevronRight, MapPin, Utensils, Car } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import sv from 'date-fns/locale/sv';
@@ -15,12 +16,12 @@ interface ItineraryProps {
 }
 
 const mockItinerary: ItineraryItem[] = [
-    { id: '1', meeting_id: '123', date: '2024-06-15', start_time: '09:00', title: 'Arrival & Coffee', description: 'Meet at the clubhouse', location_details: 'The Clubhouse has freshly brewed coffee and pastries available for all members.', location_map_url: 'https://google.com/maps' },
-    { id: '2', meeting_id: '123', date: '2024-06-15', start_time: '10:30', title: 'Drivers Briefing', description: 'Safety protocols and route overview' },
-    { id: '3', meeting_id: '123', date: '2024-06-15', start_time: '11:00', title: 'Engines Start', description: 'Departure in convoy groups' },
-    { id: '4', meeting_id: '123', date: '2024-06-15', start_time: '13:00', title: 'Lunch Stop', description: 'The Old Mill Restaurant', location_details: 'Reserved seating in the patio area. Pre-orders required for groups larger than 4.' },
-    { id: '5', meeting_id: '123', date: '2024-06-16', start_time: '09:30', title: 'Morning Drive', description: 'Pass through the valley' },
-    { id: '6', meeting_id: '123', date: '2024-06-16', start_time: '12:00', title: 'Farewell Lunch', description: 'Beachside Grill' },
+    { id: '1', meeting_id: '123', date: '2024-06-15', start_time: '09:00', title: 'Arrival & Coffee', description: 'Meet at the clubhouse', location_details: 'The Clubhouse has freshly brewed coffee and pastries available for all members.', location_map_url: 'https://google.com/maps', type: 'food' },
+    { id: '2', meeting_id: '123', date: '2024-06-15', start_time: '10:30', title: 'Drivers Briefing', description: 'Safety protocols and route overview', type: 'activity' },
+    { id: '3', meeting_id: '123', date: '2024-06-15', start_time: '11:00', title: 'Engines Start', description: 'Departure in convoy groups', type: 'travel' },
+    { id: '4', meeting_id: '123', date: '2024-06-15', start_time: '13:00', title: 'Lunch Stop', description: 'The Old Mill Restaurant', location_details: 'Reserved seating in the patio area. Pre-orders required for groups larger than 4.', type: 'food' },
+    { id: '5', meeting_id: '123', date: '2024-06-16', start_time: '09:30', title: 'Morning Drive', description: 'Pass through the valley', type: 'travel' },
+    { id: '6', meeting_id: '123', date: '2024-06-16', start_time: '12:00', title: 'Farewell Lunch', description: 'Beachside Grill', type: 'food' },
 ];
 
 const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
@@ -47,6 +48,7 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
         .select('*')
         .eq('meeting_id', meetingId)
         .order('date', { ascending: true })
+        .order('sort_order', { ascending: true }) // Added sort_order
         .order('start_time', { ascending: true });
 
       if (!error && data) {
@@ -73,6 +75,24 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
 
   const toggleDate = (date: string) => {
     setExpandedDates(prev => ({ ...prev, [date]: !prev[date] }));
+  };
+
+  const getTypeIcon = (type?: string) => {
+      switch(type) {
+          case 'food': return <Utensils size={16} />;
+          case 'travel': return <Car size={16} />;
+          case 'other': return <Info size={16} />;
+          case 'activity': default: return <Clock size={16} />;
+      }
+  };
+
+  const getTypeColor = (type?: string) => {
+      switch(type) {
+          case 'food': return 'text-orange-500';
+          case 'travel': return 'text-blue-500';
+          case 'other': return 'text-slate-500';
+          case 'activity': default: return 'text-mini-red';
+      }
   };
 
   if (loading) return <div className="p-4 text-center text-slate-400 animate-pulse">{t('itinerary')}...</div>;
@@ -116,12 +136,12 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
                              {dateItems.map((item) => (
                                 <div key={item.id} className="relative pl-16 pr-4 pb-8 group flex items-start justify-between">
                                     {/* Timeline Dot */}
-                                    <div className="absolute left-[26px] top-1.5 w-[18px] h-[18px] rounded-full border-4 border-mini-red bg-white dark:bg-slate-900 z-10" />
+                                    <div className={`absolute left-[26px] top-1.5 w-[18px] h-[18px] rounded-full border-4 bg-white dark:bg-slate-900 z-10 ${getTypeColor(item.type).replace('text-', 'border-')}`} />
 
                                     <div className="flex-grow">
                                         <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4">
-                                            <span className="font-mono font-bold text-mini-red text-lg flex items-center gap-1 min-w-[70px]">
-                                                <Clock size={16} />
+                                            <span className={`font-mono font-bold text-lg flex items-center gap-1 min-w-[70px] ${getTypeColor(item.type)}`}>
+                                                {getTypeIcon(item.type)}
                                                 {item.start_time.slice(0, 5)}
                                             </span>
                                             <div className="flex-grow">

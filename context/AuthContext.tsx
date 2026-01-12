@@ -82,7 +82,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
       if (!session) return;
 
-      let timeoutId: NodeJS.Timeout;
+      let timeoutId: ReturnType<typeof setTimeout>;
       
       const resetTimer = () => {
           if (timeoutId) clearTimeout(timeoutId);

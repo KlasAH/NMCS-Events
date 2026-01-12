@@ -58,6 +58,8 @@ export interface ExtraInfoSection {
   image_url?: string;
   address?: string;
   website_url?: string;
+  track_map_image_url?: string; // New for Track Day
+  rules_content?: string; // New for Track Day
 }
 
 export interface Meeting {
@@ -90,6 +92,8 @@ export interface ItineraryItem {
   location_details?: string;
   location_map_url?: string;
   created_at?: string;
+  sort_order?: number;
+  type?: 'activity' | 'food' | 'travel' | 'other'; // Added type
 }
 
 export interface Registration {
