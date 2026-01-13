@@ -50,7 +50,7 @@ interface ItineraryEditorItemProps {
     removeItineraryItem: (id: string) => void;
 }
 
-const ItineraryEditorItem = ({ item, updateItineraryItem, removeItineraryItem }: ItineraryEditorItemProps) => {
+const ItineraryEditorItem: React.FC<ItineraryEditorItemProps> = ({ item, updateItineraryItem, removeItineraryItem }) => {
     const dragControls = useDragControls();
 
     return (
@@ -345,7 +345,7 @@ const AdminDashboard: React.FC = () => {
       const newVal = String(!currentVal);
       
       setAppSettings(prev => ({ ...prev, [key]: newVal }));
-      handleSaveSettings(key, newVal);
+      handleSaveSettings(key as string, newVal);
   };
 
   const startEditEvent = async (evt?: Meeting) => {
@@ -426,7 +426,7 @@ const AdminDashboard: React.FC = () => {
   // --- MULTI IMAGE UPLOAD FOR GALLERY ---
   const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files || e.target.files.length === 0) return;
-      const files = Array.from(e.target.files);
+      const files = Array.from(e.target.files) as File[];
       setUploadingImage(true);
       
       const year = new Date().getFullYear();
