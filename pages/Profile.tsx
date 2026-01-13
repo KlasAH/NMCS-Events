@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle, X, AtSign, Loader2, Key } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
-import Modal from '../components/Modal';
 
 const BOARD_ROLES = [
     'Ordförande',
@@ -61,6 +60,7 @@ const Profile: React.FC = () => {
                 
                 if (error) {
                     console.error('Error fetching profile:', error);
+                    setStatusMsg({ type: 'error', text: 'Failed to load profile. Check connection.' });
                     return;
                 }
 
@@ -95,6 +95,11 @@ const Profile: React.FC = () => {
     };
 
     const handleSaveAll = async () => {
+        if (!session?.user?.id) {
+            setStatusMsg({ type: 'error', text: 'No active session. Please log in again.' });
+            return;
+        }
+
         setSaving(true);
         setStatusMsg(null);
         
@@ -116,17 +121,28 @@ const Profile: React.FC = () => {
                 updated_at: new Date().toISOString(),
             };
 
-            const { error: profileError } = await supabase
-                .from('profiles')
-                .update(updates)
-                .eq('id', session?.user.id);
+            // Timeout protection (10s)
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Request timed out. Check your internet connection.')), 10000)
+            );
+
+            // Execute Update with Race against Timeout
+            const { error: profileError } = await Promise.race([
+                supabase.from('profiles').update(updates).eq('id', session.user.id),
+                timeoutPromise
+            ]) as any;
 
             if (profileError) throw new Error('Profile save failed: ' + profileError.message);
 
             // 2. Update Password if provided
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
-                const { error: pwError } = await updatePassword(newPassword);
+                
+                const { error: pwError } = await Promise.race([
+                    updatePassword(newPassword),
+                    timeoutPromise
+                ]) as any;
+
                 if (pwError) throw new Error('Password update failed: ' + pwError.message);
                 setNewPassword(''); // Clear after success
             }
@@ -134,7 +150,8 @@ const Profile: React.FC = () => {
             setStatusMsg({ type: 'success', text: 'All data successfully stored in Supabase.' });
 
         } catch (error: any) {
-            setStatusMsg({ type: 'error', text: error.message });
+            console.error("Save Error:", error);
+            setStatusMsg({ type: 'error', text: error.message || 'An unexpected error occurred.' });
         } finally {
             setSaving(false);
         }
@@ -187,6 +204,7 @@ const Profile: React.FC = () => {
 
                         {/* SAVE BUTTON - Top Right */}
                         <button 
+                            type="button"
                             onClick={handleSaveAll}
                             disabled={saving}
                             className={`

@@ -26,18 +26,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authStatus, setAuthStatus] = useState<string>('Initializing...');
   const [autoLogoutTime, setAutoLogoutTime] = useState<number>(8 * 60 * 60 * 1000); // Default 8 hours
 
+  // SETTINGS LISTENER (Realtime)
   useEffect(() => {
-    // Fetch custom auto-logout time from app_settings
-    if (!isDemoMode) {
-      const fetchSettings = async () => {
-        const { data } = await supabase.from('app_settings').select('value').eq('key', 'auto_logout_hours').single();
-        if (data?.value) {
-            // value is stored as hours string, convert to ms
-            setAutoLogoutTime(parseFloat(data.value) * 60 * 60 * 1000);
+    if (isDemoMode) return;
+
+    const parseAndSetTimer = (val: string) => {
+        const hours = parseFloat(val);
+        if (!isNaN(hours) && hours > 0) {
+            console.log(`[Auth] Updating Auto-Logout to ${hours} hours`);
+            setAutoLogoutTime(hours * 60 * 60 * 1000);
         }
-      };
-      fetchSettings();
-    }
+    };
+
+    // 1. Initial Fetch
+    const fetchSettings = async () => {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'auto_logout_hours').maybeSingle();
+      if (data?.value) {
+          parseAndSetTimer(data.value);
+      }
+    };
+    fetchSettings();
+
+    // 2. Realtime Subscription
+    const channel = supabase.channel('app_settings_watcher')
+        .on(
+            'postgres_changes',
+            {
+                event: '*',
+                schema: 'public',
+                table: 'app_settings',
+                filter: 'key=eq.auto_logout_hours'
+            },
+            (payload) => {
+                // Handle UPDATE and INSERT
+                const newData = payload.new as { key: string, value: string } | null;
+                if (newData?.value) {
+                    parseAndSetTimer(newData.value);
+                }
+            }
+        )
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
