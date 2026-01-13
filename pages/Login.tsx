@@ -6,7 +6,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, Loader2, Database, ShieldCheck, Server, LogOut } from 'lucide-react';
+import { Eye, EyeOff, Apple, Mail, User, ArrowRight, CheckCircle, AtSign, Loader2, Database, ShieldCheck, Server, LogOut, Lock, X, Check } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -22,6 +22,7 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState(''); // For Signup only
   
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState(''); // New State
   const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
@@ -36,6 +37,17 @@ const Login: React.FC = () => {
       { msg: 'Persisting to Database...', icon: Database },
       { msg: 'Handshake Complete.', icon: CheckCircle }
   ];
+
+  // Password Complexity Logic
+  const passwordRequirements = [
+      { id: 'len', label: "8+ chars", met: password.length >= 8 },
+      { id: 'up', label: "Uppercase (A-Z)", met: /[A-Z]/.test(password) },
+      { id: 'low', label: "Lowercase (a-z)", met: /[a-z]/.test(password) },
+      { id: 'num', label: "Number (0-9)", met: /\d/.test(password) },
+      { id: 'spec', label: "Special (!@#)", met: /[^A-Za-z0-9]/.test(password) },
+  ];
+  const isPasswordComplex = passwordRequirements.every(r => r.met);
+  const passwordsMatch = password === confirmPassword && password !== '';
 
   // Redirect if session becomes active (Login successful)
   useEffect(() => {
@@ -54,6 +66,13 @@ const Login: React.FC = () => {
         setViewState('reset-confirm');
     }
   }, [location]);
+
+  // Reset state when switching views
+  useEffect(() => {
+      setError(null);
+      setConfirmPassword('');
+      setPassword('');
+  }, [viewState]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,6 +145,16 @@ const Login: React.FC = () => {
 
   const handleSignUp = async (e: React.FormEvent) => {
       e.preventDefault();
+      
+      if (!isPasswordComplex) {
+          setError("Password does not meet security requirements.");
+          return;
+      }
+      if (!passwordsMatch) {
+          setError("Passwords do not match.");
+          return;
+      }
+
       setFormLoading(true);
       setError(null);
       setHandshakeStep(1); // Start visualization
@@ -185,6 +214,16 @@ const Login: React.FC = () => {
 
   const handleResetConfirm = async (e: React.FormEvent) => {
       e.preventDefault();
+
+      if (!isPasswordComplex) {
+        setError("Password does not meet security requirements.");
+        return;
+      }
+      if (!passwordsMatch) {
+          setError("Passwords do not match.");
+          return;
+      }
+
       setFormLoading(true);
       const { error } = await updatePassword(password);
       if (error) {
@@ -225,7 +264,7 @@ const Login: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4 transition-colors">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4 transition-colors py-12">
       <motion.div 
         layout
         initial={{ scale: 0.9, opacity: 0 }}
@@ -367,37 +406,84 @@ const Login: React.FC = () => {
                 )}
 
                 {(viewState === 'login' || viewState === 'signup' || viewState === 'reset-confirm') && (
-                    <div>
-                        <div className="flex justify-between items-center mb-1">
-                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">{t('password')}</label>
-                            {viewState === 'login' && (
-                                <button type="button" onClick={() => setViewState('forgot')} className="text-xs font-bold text-mini-red hover:underline">
-                                    {t('forgotBtn')}
+                    <div className="space-y-4">
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">{t('password')}</label>
+                                {viewState === 'login' && (
+                                    <button type="button" onClick={() => setViewState('forgot')} className="text-xs font-bold text-mini-red hover:underline">
+                                        {t('forgotBtn')}
+                                    </button>
+                                )}
+                            </div>
+                            <div className="relative">
+                                <input
+                                    type={showPassword ? 'text' : 'password'}
+                                    required
+                                    className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white pr-12"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder={viewState === 'login' ? "••••••••" : "Create password"}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-mini-black dark:hover:text-white transition-colors focus:outline-none p-1"
+                                >
+                                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                                 </button>
-                            )}
+                            </div>
                         </div>
-                        <div className="relative">
-                        <input
-                            type={showPassword ? 'text' : 'password'}
-                            required
-                            minLength={6}
-                            className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red focus:border-transparent outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white pr-12"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="••••••••"
-                        />
-                        <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-mini-black dark:hover:text-white transition-colors focus:outline-none p-1"
-                        >
-                            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                        </button>
-                        </div>
-                        {viewState === 'signup' && (
-                            <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
-                                <ShieldCheck size={10} /> Password will be encrypted with Bcrypt hashing before storage.
-                            </p>
+
+                        {/* Confirm Password & Requirements (Sign Up / Reset Only) */}
+                        {(viewState === 'signup' || viewState === 'reset-confirm') && (
+                            <>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Confirm Password</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showPassword ? 'text' : 'password'}
+                                            required
+                                            className={`w-full px-4 py-3 rounded-xl border outline-none transition-all bg-white dark:bg-slate-800 text-slate-900 dark:text-white pr-12
+                                                ${confirmPassword && confirmPassword !== password 
+                                                    ? 'border-red-300 focus:ring-2 focus:ring-red-500' 
+                                                    : confirmPassword && confirmPassword === password 
+                                                    ? 'border-green-300 focus:ring-2 focus:ring-green-500' 
+                                                    : 'border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-mini-red'}
+                                            `}
+                                            value={confirmPassword}
+                                            onChange={(e) => setConfirmPassword(e.target.value)}
+                                            placeholder="Confirm password"
+                                        />
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 p-1">
+                                            {confirmPassword && (
+                                                passwordsMatch ? <Check className="text-green-500" size={20} /> : <X className="text-red-500" size={20} />
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl border border-slate-100 dark:border-slate-700">
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Password Requirements</p>
+                                    <div className="grid grid-cols-2 gap-y-1 gap-x-2">
+                                        {passwordRequirements.map(req => (
+                                            <div key={req.id} className="flex items-center gap-1.5 text-xs transition-colors duration-300">
+                                                {req.met ? (
+                                                    <Check size={12} className="text-green-500 shrink-0" strokeWidth={3} />
+                                                ) : (
+                                                    <div className="w-3 h-3 rounded-full border border-slate-300 dark:border-slate-600 shrink-0" />
+                                                )}
+                                                <span className={req.met ? 'text-green-700 dark:text-green-400 font-medium' : 'text-slate-500 dark:text-slate-400'}>
+                                                    {req.label}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-400 flex items-center gap-1">
+                                        <ShieldCheck size={10} /> Password will be encrypted with Bcrypt.
+                                    </div>
+                                </div>
+                            </>
                         )}
                     </div>
                 )}
@@ -419,8 +505,8 @@ const Login: React.FC = () => {
                          </button>
                          <button
                             type="submit"
-                            disabled={formLoading}
-                            className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-all shadow-xl shadow-black/10 disabled:opacity-50"
+                            disabled={formLoading || !isPasswordComplex || !passwordsMatch}
+                            className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-all shadow-xl shadow-black/10 disabled:opacity-50 disabled:cursor-not-allowed"
                          >
                             {formLoading ? t('creatingAccount') : t('createAccount')}
                          </button>
@@ -428,7 +514,7 @@ const Login: React.FC = () => {
                 ) : (
                     <button
                         type="submit"
-                        disabled={formLoading}
+                        disabled={formLoading || ((viewState === 'reset-confirm') && (!isPasswordComplex || !passwordsMatch))}
                         className="w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors disabled:opacity-50 shadow-lg shadow-black/20 flex items-center justify-center gap-2"
                     >
                         {formLoading ? t('processing') : (
