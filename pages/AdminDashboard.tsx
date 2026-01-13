@@ -13,6 +13,7 @@ import { format } from 'date-fns';
 import Modal from '../components/Modal';
 import QRCode from 'react-qr-code';
 import QrCodeStudio from '../components/QrCodeStudio';
+import { compressImage } from '../lib/compression';
 
 const MASTER_ADMIN_EMAIL = 'klas.ahlman@gmail.com';
 
@@ -391,11 +392,9 @@ const AdminDashboard: React.FC = () => {
   // --- IMAGE UPLOAD LOGIC ---
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    const year = new Date().getFullYear();
-    const eventSlug = editingEventData.title ? editingEventData.title.toLowerCase().replace(/[^a-z0-9]/g, '-') : 'untitled';
-    const path = `event/${year}/${eventSlug}/${Date.now()}_${file.name.replace(/\s/g, '_')}`;
+    const rawFile = e.target.files[0];
     setUploadingImage(true);
+    
     try {
         if (isDemoMode) { 
             setTimeout(() => {
@@ -404,6 +403,18 @@ const AdminDashboard: React.FC = () => {
             }, 1000);
             return; 
         }
+
+        // COMPRESS IMAGE
+        const file = await compressImage(rawFile);
+
+        const year = new Date().getFullYear();
+        // Use Readable Folder Name: Event Albums/2026/Summer Meet/file.jpg
+        const eventFolderName = editingEventData.title ? editingEventData.title.trim() : 'Untitled Event';
+        // Sanitize file name but keep readability
+        const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        
+        const path = `Event Albums/${year}/${eventFolderName}/${Date.now()}_${cleanFileName}`;
+
         const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file);
         if (error) throw error;
         const { data: publicUrlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
@@ -419,11 +430,17 @@ const AdminDashboard: React.FC = () => {
       setUploadingImage(true);
       
       const year = new Date().getFullYear();
-      const eventSlug = editingEventData.title ? editingEventData.title.toLowerCase().replace(/[^a-z0-9]/g, '-') : 'untitled';
+      const eventFolderName = editingEventData.title ? editingEventData.title.trim() : 'Untitled Event';
       
-      const uploadPromises = files.map(async (file) => {
-          const path = `event/${year}/${eventSlug}/gallery/${Date.now()}_${file.name.replace(/\s/g, '_')}`;
+      const uploadPromises = files.map(async (rawFile) => {
           if (isDemoMode) return "https://picsum.photos/400/300?random=" + Math.random();
+          
+          // COMPRESS IMAGE
+          const file = await compressImage(rawFile);
+          
+          const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          // Path: Event Albums/2026/Summer Meet/123456_photo.jpg
+          const path = `Event Albums/${year}/${eventFolderName}/${Date.now()}_${cleanFileName}`;
           
           const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file);
           if (error) throw error;
@@ -761,7 +778,7 @@ const AdminDashboard: React.FC = () => {
                                 <div className="mt-2 flex flex-col items-center">
                                     {editingEventData.cover_image_url && <img src={editingEventData.cover_image_url} className="h-40 object-cover rounded-lg mb-4" />}
                                     <label className="cursor-pointer bg-white dark:bg-slate-700 px-4 py-2 rounded-lg font-bold text-sm border border-slate-200 dark:border-slate-600 hover:border-mini-red">
-                                        {uploadingImage ? 'Uploading...' : 'Upload Image'}
+                                        {uploadingImage ? 'Compressing & Uploading...' : 'Upload Image'}
                                         <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => setEditingEventData({...editingEventData, cover_image_url: url}))} />
                                     </label>
                                 </div>
@@ -891,7 +908,7 @@ const AdminDashboard: React.FC = () => {
                                                 <img src={hotel.image_url} className="h-32 object-cover rounded-lg mb-2" />
                                             ) : <div className="h-32 w-full bg-slate-100 dark:bg-slate-800 rounded-lg mb-2 flex items-center justify-center text-slate-400 text-xs">No Image</div>}
                                             <label className="cursor-pointer text-blue-600 font-bold hover:underline text-sm">
-                                                {uploadingImage ? 'Uploading...' : 'Upload Photo'}
+                                                {uploadingImage ? 'Compressing & Uploading...' : 'Upload Photo'}
                                                 <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => updateList('hotel_info', idx, 'image_url', url))} />
                                             </label>
                                         </div>
@@ -956,7 +973,7 @@ const AdminDashboard: React.FC = () => {
                                                 <img src={park.image_url} className="h-32 object-cover rounded-lg mb-2" />
                                             ) : <div className="h-32 w-full bg-slate-100 dark:bg-slate-800 rounded-lg mb-2 flex items-center justify-center text-slate-400 text-xs">No Image</div>}
                                             <label className="cursor-pointer text-blue-600 font-bold hover:underline text-sm">
-                                                {uploadingImage ? 'Uploading...' : 'Upload Photo'}
+                                                {uploadingImage ? 'Compressing & Uploading...' : 'Upload Photo'}
                                                 <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => updateList('parking_info', idx, 'image_url', url))} />
                                             </label>
                                         </div>
@@ -1100,7 +1117,7 @@ const AdminDashboard: React.FC = () => {
                                                     ) : <div className="h-32 w-full bg-slate-100 dark:bg-slate-800 rounded-lg mb-2 flex items-center justify-center text-slate-400 text-xs">No Image</div>}
                                                     
                                                     <label className="cursor-pointer text-blue-600 font-bold hover:underline text-sm">
-                                                        {uploadingImage ? 'Uploading...' : 'Upload Photo'}
+                                                        {uploadingImage ? 'Compressing & Uploading...' : 'Upload Photo'}
                                                         <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => updateList('extra_info', trackDayIndex, 'image_url', url))} />
                                                     </label>
                                                 </div>
@@ -1115,7 +1132,7 @@ const AdminDashboard: React.FC = () => {
                                                     ) : <div className="h-32 w-full bg-slate-100 dark:bg-slate-800 rounded-lg mb-2 flex items-center justify-center text-slate-400 text-xs">No Map</div>}
                                                     
                                                     <label className="cursor-pointer text-blue-600 font-bold hover:underline text-sm">
-                                                        {uploadingImage ? 'Uploading...' : 'Upload Map'}
+                                                        {uploadingImage ? 'Compressing & Uploading...' : 'Upload Map'}
                                                         <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, (url) => updateList('extra_info', trackDayIndex, 'track_map_image_url', url))} />
                                                     </label>
                                                 </div>

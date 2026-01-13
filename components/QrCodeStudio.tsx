@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'react-qr-code';
 import { Palette, ImageIcon, Download, Circle, Square, Image, X } from 'lucide-react';
 import { getAssetUrl, supabase, STORAGE_BUCKET } from '../lib/supabase';
+import { compressImage } from '../lib/compression';
 
 interface QrCodeStudioProps {
     initialUrl?: string;
@@ -23,8 +24,8 @@ const QrCodeStudio: React.FC<QrCodeStudioProps> = ({ initialUrl = '' }) => {
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'bg') => {
         if (!e.target.files || e.target.files.length === 0) return;
-        const file = e.target.files[0];
-        const path = `qr-assets/${Date.now()}_${file.name.replace(/\s/g, '_')}`;
+        const rawFile = e.target.files[0];
+        const path = `qr-assets/${Date.now()}_${rawFile.name.replace(/\s/g, '_')}`;
         setUploading(true);
         
         try {
@@ -36,6 +37,9 @@ const QrCodeStudio: React.FC<QrCodeStudioProps> = ({ initialUrl = '' }) => {
                  setUploading(false);
                  return;
             }
+
+            // COMPRESS IMAGE (Max width 800px for QR assets is plenty)
+            const file = await compressImage(rawFile, 800);
 
             const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file);
             if (error) throw error;
