@@ -7,9 +7,10 @@ import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle, X, AtSign, Loader2, Key } from 'lucide-react';
+import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle, X, AtSign, Loader2, Key, Wrench } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
+import SupabaseTester from '../components/SupabaseTester';
 
 const BOARD_ROLES = [
     'Ordförande',
@@ -36,6 +37,7 @@ const Profile: React.FC = () => {
     const [loadingData, setLoadingData] = useState(true);
     const [saving, setSaving] = useState(false);
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const [showFixer, setShowFixer] = useState(false);
 
     // Password State
     const [newPassword, setNewPassword] = useState('');
@@ -183,8 +185,8 @@ const Profile: React.FC = () => {
             let errorMessage = error.message || 'An unexpected error occurred.';
             
             // Helpful hint for missing column error which is common in development
-            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache')) {
-                errorMessage = "Database Error: Missing 'board_role' column. Please scroll to footer and click 'Check Database Connection' to apply fixes.";
+            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache') || errorMessage.includes('does not exist')) {
+                errorMessage = "Database Error: Missing 'board_role' column. Click 'Fix Database' to repair.";
             }
 
             setStatusMsg({ type: 'error', text: errorMessage });
@@ -220,10 +222,22 @@ const Profile: React.FC = () => {
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: 'auto', opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}
-                            className={`w-full px-6 py-3 flex items-center justify-center gap-2 font-bold text-sm ${statusMsg.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+                            className={`w-full px-6 py-3 flex flex-col md:flex-row items-center justify-center gap-2 font-bold text-sm ${statusMsg.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
                         >
-                            {statusMsg.type === 'success' ? <CheckCircle size={18}/> : <AlertCircle size={18}/>}
-                            {statusMsg.text}
+                            <div className="flex items-center gap-2">
+                                {statusMsg.type === 'success' ? <CheckCircle size={18}/> : <AlertCircle size={18}/>}
+                                {statusMsg.text}
+                            </div>
+                            
+                            {/* FIX BUTTON for Database Errors */}
+                            {statusMsg.type === 'error' && statusMsg.text.includes('board_role') && (
+                                <button 
+                                    onClick={() => setShowFixer(true)}
+                                    className="mt-2 md:mt-0 ml-0 md:ml-4 flex items-center gap-1 bg-white text-red-600 px-3 py-1 rounded-full text-xs hover:bg-red-50 shadow-sm border border-red-200 transition-colors"
+                                >
+                                    <Wrench size={12} /> Fix Database
+                                </button>
+                            )}
                         </motion.div>
                     )}
                 </AnimatePresence>
@@ -410,6 +424,8 @@ const Profile: React.FC = () => {
                     </div>
                 </div>
             </motion.div>
+
+            <SupabaseTester isOpen={showFixer} onClose={() => setShowFixer(false)} />
         </div>
     );
 };
