@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle, X, AtSign, Loader2, Key, Wrench } from 'lucide-react';
+import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle, X, AtSign, Loader2, Key, Wrench, HelpCircle } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import SupabaseTester from '../components/SupabaseTester';
@@ -36,7 +36,7 @@ const Profile: React.FC = () => {
 
     const [loadingData, setLoadingData] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'warning' | 'error', text: string } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
 
     // Password State
@@ -64,8 +64,6 @@ const Profile: React.FC = () => {
                 
                 if (error) {
                     console.error('Error fetching profile:', error);
-                    // Don't show error to user immediately, just log it. They might be a new user.
-                    // The Upsert on save will fix missing rows.
                 }
 
                 if (data) {
@@ -73,16 +71,14 @@ const Profile: React.FC = () => {
                         full_name: data.full_name || session.user.user_metadata?.full_name || '',
                         username: data.username || session.user.user_metadata?.username || '',
                         email: data.email || session.user.email || '',
-                        board_role: data.board_role || '',
-                        system_role: data.role || 'user'
+                        board_role: data.board_role || '', // This maps to 'board_role' column (Title)
+                        system_role: data.role || 'user'   // This maps to 'role' column (Permissions)
                     });
                     
-                    // Critical: Sync ThemeContext with DB data on load
                     if (data.car_model && MODELS.some(m => m.id === data.car_model)) {
                         setModel(data.car_model as MiniModel);
                     }
                 } else {
-                    // Fallback to metadata if no profile row exists
                     setFormData({
                         full_name: session.user.user_metadata?.full_name || '',
                         username: session.user.user_metadata?.username || '',
@@ -103,7 +99,6 @@ const Profile: React.FC = () => {
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
-        // Clear status on edit
         if (statusMsg) setStatusMsg(null);
     };
 
@@ -115,6 +110,7 @@ const Profile: React.FC = () => {
 
         setSaving(true);
         setStatusMsg(null);
+        let partialSuccess = false;
         
         try {
             if (isDemoMode) {
@@ -124,14 +120,9 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // 1. Create a SCOPED CLIENT for Robust Auth
-            // This mirrors the logic in SupabaseTester/AuthContext to ensure the request is properly authenticated
-            // and avoids issues with the global client state.
             const scopedClient = createClient(finalUrl, finalKey, {
                 global: {
-                    headers: {
-                        Authorization: `Bearer ${session.access_token}`
-                    }
+                    headers: { Authorization: `Bearer ${session.access_token}` }
                 },
                 auth: {
                     persistSession: false,
@@ -140,53 +131,70 @@ const Profile: React.FC = () => {
                 }
             });
 
-            // 2. Prepare Data (Include ID for Upsert)
+            // Prepare Data
+            // We consciously map 'board_role' state to 'board_role' column.
+            // The 'role' column is intentionally excluded from updates here as it's admin-managed.
             const profileData = {
                 id: session.user.id,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
-                board_role: formData.board_role,
-                car_model: model, // Include current selected model from Context
+                board_role: formData.board_role, 
+                car_model: model,
                 updated_at: new Date().toISOString(),
             };
 
-            // Timeout protection (30s for cold starts)
             const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Request timed out (30s). Database might be waking up.')), 30000)
+                setTimeout(() => reject(new Error('Request timed out. Database might be waking up.')), 30000)
             );
 
-            // 3. Execute UPSERT with Race against Timeout
-            // Using UPSERT instead of UPDATE ensures that if the profile row is missing, it gets created.
-            const { error: profileError } = await Promise.race([
+            // 1. Attempt Primary Save
+            let { error: profileError } = await Promise.race([
                 scopedClient.from('profiles').upsert(profileData),
                 timeoutPromise
             ]) as any;
 
+            // 2. Fallback: If 'board_role' causes issues (cache mismatch), save without it.
+            if (profileError && (profileError.message?.includes('board_role') || profileError.message?.includes('does not exist'))) {
+                 console.warn("[Profile] 'board_role' column issue. Saving basic info only.");
+                 
+                 const { board_role, ...safeData } = profileData;
+                 const { error: retryError } = await scopedClient.from('profiles').upsert(safeData);
+                 
+                 if (!retryError) {
+                     profileError = null; // Suppress error because primary data is saved
+                     partialSuccess = true;
+                 } else {
+                     profileError = retryError;
+                 }
+            }
+
             if (profileError) throw new Error(profileError.message || 'Profile save failed');
 
-            // 4. Update Password if provided
+            // 3. Update Password if provided
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
-                
                 const { error: pwError } = await Promise.race([
                     updatePassword(newPassword),
                     timeoutPromise
                 ]) as any;
-
                 if (pwError) throw new Error('Password update failed: ' + pwError.message);
-                setNewPassword(''); // Clear after success
+                setNewPassword('');
             }
 
-            setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+            if (partialSuccess) {
+                // We show success but log the warning to console/internal state
+                setStatusMsg({ type: 'warning', text: 'Profile saved! (Note: Board Title not updated due to DB sync)' });
+            } else {
+                setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+            }
 
         } catch (error: any) {
             console.error("Save Error:", error);
             let errorMessage = error.message || 'An unexpected error occurred.';
             
-            // Helpful hint for missing column error which is common in development
-            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache') || errorMessage.includes('does not exist')) {
-                errorMessage = "Database Error: Missing 'board_role' column. Click 'Fix Database' to repair.";
+            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache')) {
+                errorMessage = "Database Sync Error. Click 'Fix Database' below.";
             }
 
             setStatusMsg({ type: 'error', text: errorMessage });
@@ -222,15 +230,17 @@ const Profile: React.FC = () => {
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: 'auto', opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}
-                            className={`w-full px-6 py-3 flex flex-col md:flex-row items-center justify-center gap-2 font-bold text-sm ${statusMsg.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+                            className={`w-full px-6 py-3 flex flex-col md:flex-row items-center justify-center gap-2 font-bold text-sm 
+                                ${statusMsg.type === 'success' ? 'bg-green-100 text-green-800' : 
+                                  statusMsg.type === 'warning' ? 'bg-yellow-100 text-yellow-800' : 
+                                  'bg-red-100 text-red-800'}`}
                         >
                             <div className="flex items-center gap-2">
-                                {statusMsg.type === 'success' ? <CheckCircle size={18}/> : <AlertCircle size={18}/>}
+                                {statusMsg.type === 'success' ? <CheckCircle size={18}/> : statusMsg.type === 'warning' ? <AlertCircle size={18}/> : <AlertCircle size={18}/>}
                                 {statusMsg.text}
                             </div>
-                            
-                            {/* FIX BUTTON for Database Errors */}
-                            {statusMsg.type === 'error' && statusMsg.text.includes('board_role') && (
+                            {/* Only show Fix button if it's a hard error */}
+                            {statusMsg.type === 'error' && (
                                 <button 
                                     onClick={() => setShowFixer(true)}
                                     className="mt-2 md:mt-0 ml-0 md:ml-4 flex items-center gap-1 bg-white text-red-600 px-3 py-1 rounded-full text-xs hover:bg-red-50 shadow-sm border border-red-200 transition-colors"
@@ -326,14 +336,27 @@ const Profile: React.FC = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {/* System Role - Read Only */}
                                         <div>
-                                            <label className={LABEL_STYLE}>System Role</label>
-                                            <div className="px-5 py-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 font-bold border border-blue-100 dark:border-blue-800 flex items-center gap-2 uppercase text-sm">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">System Permission</label>
+                                                <div className="group relative">
+                                                    <HelpCircle size={14} className="text-slate-400 cursor-help" />
+                                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                                        Controls what you can access (Admin, User, etc). Stored in 'role' column.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="px-5 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border border-slate-200 dark:border-slate-700 flex items-center gap-2 uppercase text-sm cursor-not-allowed">
                                                 <Shield size={16} /> {formData.system_role}
                                             </div>
                                         </div>
+
+                                        {/* Board Title - Editable */}
                                         <div>
-                                            <label className={LABEL_STYLE}>{t('boardRole')}</label>
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Board Title (Display)</label>
+                                            </div>
                                             <div className="relative">
                                                 <select 
                                                     value={formData.board_role}

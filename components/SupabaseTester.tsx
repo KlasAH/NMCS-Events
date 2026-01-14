@@ -98,6 +98,8 @@ DROP POLICY IF EXISTS "Public/Auth can read settings" ON public.app_settings;
 CREATE POLICY "Public/Auth can read settings" ON public.app_settings FOR SELECT USING (true);
 
 -- 7. FEATURE: Board Role Column
+-- Note: 'role' is for System Permissions (Admin/User). 
+-- 'board_role' is for Display Titles (Ordförande etc).
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
 
@@ -116,12 +118,15 @@ ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS gallery_images JSONB DEFAUL
 NOTIFY pgrst, 'reload schema';
 `;
 
+const RELOAD_SQL = `NOTIFY pgrst, 'reload schema';`;
+
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const [inputVal, setInputVal] = useState('');
     const [outputVal, setOutputVal] = useState<string | null>(null);
     const [status, setStatus] = useState<'idle' | 'writing' | 'reading' | 'success' | 'error'>('idle');
     const [logs, setLogs] = useState<string[]>([]);
     const [copied, setCopied] = useState(false);
+    const [reloadCopied, setReloadCopied] = useState(false);
     
     // Table Data State
     const [tableRows, setTableRows] = useState<any[]>([]);
@@ -138,6 +143,12 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         navigator.clipboard.writeText(FIX_SQL);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
+    };
+
+    const copyReloadSql = () => {
+        navigator.clipboard.writeText(RELOAD_SQL);
+        setReloadCopied(true);
+        setTimeout(() => setReloadCopied(false), 2000);
     };
 
     // Helper to timeout a promise
@@ -680,12 +691,21 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                          >
                             <ExternalLink size={14} /> Open Dashboard
                          </a>
+                        
+                        <button 
+                            onClick={copyReloadSql}
+                            className="flex-1 flex items-center justify-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
+                        >
+                            {reloadCopied ? <Check size={14} /> : <RefreshCw size={14} />}
+                            {reloadCopied ? 'Copied!' : 'Copy "Reload Schema"'}
+                        </button>
+
                         <button 
                             onClick={copySql}
                             className="flex-1 flex items-center justify-center gap-2 bg-mini-red hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
                         >
                             {copied ? <Check size={14} /> : <Copy size={14} />}
-                            {copied ? 'Copied!' : 'Copy SQL Fixes'}
+                            {copied ? 'Copied!' : 'Copy Full Fix'}
                         </button>
                     </div>
                 </div>
