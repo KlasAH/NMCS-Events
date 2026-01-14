@@ -121,9 +121,9 @@ const Profile: React.FC = () => {
                 updated_at: new Date().toISOString(),
             };
 
-            // Timeout protection (10s)
+            // Timeout protection (Increased to 30s for cold starts)
             const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Request timed out. Check your internet connection.')), 10000)
+                setTimeout(() => reject(new Error('Request timed out (30s). Database might be waking up.')), 30000)
             );
 
             // Execute Update with Race against Timeout
