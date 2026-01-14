@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -60,8 +61,8 @@ const Profile: React.FC = () => {
                 
                 if (error) {
                     console.error('Error fetching profile:', error);
-                    setStatusMsg({ type: 'error', text: 'Failed to load profile. Check connection.' });
-                    return;
+                    // Don't show error to user immediately, just log it. They might be a new user.
+                    // The Upsert on save will fix missing rows.
                 }
 
                 if (data) {
@@ -77,6 +78,15 @@ const Profile: React.FC = () => {
                     if (data.car_model && MODELS.some(m => m.id === data.car_model)) {
                         setModel(data.car_model as MiniModel);
                     }
+                } else {
+                    // Fallback to metadata if no profile row exists
+                    setFormData({
+                        full_name: session.user.user_metadata?.full_name || '',
+                        username: session.user.user_metadata?.username || '',
+                        email: session.user.email || '',
+                        board_role: '',
+                        system_role: 'user'
+                    });
                 }
             } catch (err) {
                 console.error(err);
@@ -111,8 +121,25 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // 1. Update Profile Data in Supabase
-            const updates = {
+            // 1. Create a SCOPED CLIENT for Robust Auth
+            // This mirrors the logic in SupabaseTester/AuthContext to ensure the request is properly authenticated
+            // and avoids issues with the global client state.
+            const scopedClient = createClient(finalUrl, finalKey, {
+                global: {
+                    headers: {
+                        Authorization: `Bearer ${session.access_token}`
+                    }
+                },
+                auth: {
+                    persistSession: false,
+                    autoRefreshToken: false,
+                    detectSessionInUrl: false
+                }
+            });
+
+            // 2. Prepare Data (Include ID for Upsert)
+            const profileData = {
+                id: session.user.id,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
@@ -121,20 +148,21 @@ const Profile: React.FC = () => {
                 updated_at: new Date().toISOString(),
             };
 
-            // Timeout protection (Increased to 30s for cold starts)
+            // Timeout protection (30s for cold starts)
             const timeoutPromise = new Promise((_, reject) => 
                 setTimeout(() => reject(new Error('Request timed out (30s). Database might be waking up.')), 30000)
             );
 
-            // Execute Update with Race against Timeout
+            // 3. Execute UPSERT with Race against Timeout
+            // Using UPSERT instead of UPDATE ensures that if the profile row is missing, it gets created.
             const { error: profileError } = await Promise.race([
-                supabase.from('profiles').update(updates).eq('id', session.user.id),
+                scopedClient.from('profiles').upsert(profileData),
                 timeoutPromise
             ]) as any;
 
             if (profileError) throw new Error('Profile save failed: ' + profileError.message);
 
-            // 2. Update Password if provided
+            // 4. Update Password if provided
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 
@@ -147,7 +175,7 @@ const Profile: React.FC = () => {
                 setNewPassword(''); // Clear after success
             }
 
-            setStatusMsg({ type: 'success', text: 'All data successfully stored in Supabase.' });
+            setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
 
         } catch (error: any) {
             console.error("Save Error:", error);
