@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -98,6 +99,7 @@ CREATE POLICY "Public/Auth can read settings" ON public.app_settings FOR SELECT 
 
 -- 7. FEATURE: Board Role Column
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
 
 -- 8. FEATURE: Publish Status
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('draft', 'published')) DEFAULT 'draft';
@@ -109,6 +111,9 @@ ALTER TABLE public.itinerary_items ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'a
 -- 10. FEATURE: Photos and Gallery
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS google_photos_url TEXT;
 ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS gallery_images JSONB DEFAULT '[]'::jsonb;
+
+-- 11. FIX: Reload Schema Cache (Critical for new columns)
+NOTIFY pgrst, 'reload schema';
 `;
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
@@ -514,7 +519,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks.</li>
                         <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
                         <li><strong>NEW: Publish Status:</strong> Added 'status' column to meetings table.</li>
-                        <li><strong>NEW: Photos:</strong> Added google_photos_url and gallery_images to meetings table.</li>
+                        <li><strong>NEW: Board Role:</strong> Added 'board_role' column to profiles table.</li>
                     </ul>
                 </div>
 

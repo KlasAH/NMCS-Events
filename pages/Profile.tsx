@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
@@ -160,7 +161,7 @@ const Profile: React.FC = () => {
                 timeoutPromise
             ]) as any;
 
-            if (profileError) throw new Error('Profile save failed: ' + profileError.message);
+            if (profileError) throw new Error(profileError.message || 'Profile save failed');
 
             // 4. Update Password if provided
             if (newPassword) {
@@ -179,7 +180,14 @@ const Profile: React.FC = () => {
 
         } catch (error: any) {
             console.error("Save Error:", error);
-            setStatusMsg({ type: 'error', text: error.message || 'An unexpected error occurred.' });
+            let errorMessage = error.message || 'An unexpected error occurred.';
+            
+            // Helpful hint for missing column error which is common in development
+            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache')) {
+                errorMessage = "Database Error: Missing 'board_role' column. Please scroll to footer and click 'Check Database Connection' to apply fixes.";
+            }
+
+            setStatusMsg({ type: 'error', text: errorMessage });
         } finally {
             setSaving(false);
         }

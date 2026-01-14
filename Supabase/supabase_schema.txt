@@ -19,12 +19,14 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   username TEXT,
   role TEXT CHECK (role IN ('admin', 'board', 'user')) DEFAULT 'user',
   car_model TEXT DEFAULT 'r53',
+  board_role TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 -- Ensure columns exist (Migration safety)
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT DEFAULT 'r53';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- 3. CONNECTION TESTS (Diagnostics)
