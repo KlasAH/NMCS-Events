@@ -161,7 +161,8 @@ const AdminDashboard: React.FC = () => {
       maintenance_mode: 'false',
       allow_member_uploads: 'false',
       enable_waitlist: 'true',
-      beta_features: 'false'
+      beta_features: 'false',
+      auto_theme_switching: 'false' // NEW
   });
   const [settingsStatus, setSettingsStatus] = useState('');
 
@@ -1392,6 +1393,13 @@ const AdminDashboard: React.FC = () => {
                                     checked={appSettings.public_registration === 'true'} 
                                     onChange={() => handleToggleSetting('public_registration')}
                                     icon={Globe}
+                                />
+                                <ToggleSwitch 
+                                    label="Auto Seasonal Themes" 
+                                    description="Automatically change app theme based on Swedish calendar holidays (Christmas, Midsummer, etc)."
+                                    checked={appSettings.auto_theme_switching === 'true'} 
+                                    onChange={() => handleToggleSetting('auto_theme_switching')}
+                                    icon={Palette}
                                 />
                                 <ToggleSwitch 
                                     label="Enable Waitlist" 

@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase, getAssetUrl } from '../lib/supabase';
+import { supabase, getAssetUrl, isDemoMode } from '../lib/supabase';
 
 export type MiniModel = 'r53' | 'r52' | 'r56' | 'r55' | 'f56' | 'f56lci' | 'f54' | 'f54lci' | 'j01' | 'gp1' | 'gp2' | 'gp3';
 
@@ -111,6 +111,37 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+// Helper to determine Swedish Seasonal Theme
+const getSeasonalTheme = (): MiniModel | null => {
+    const now = new Date();
+    const month = now.getMonth(); // 0-11
+    const day = now.getDate();
+
+    // 1. Christmas (Dec 1 - Dec 31) -> Red (R53)
+    if (month === 11) return 'r53';
+
+    // 2. Halloween / All Saints (Oct 25 - Nov 5) -> Orange (F56)
+    if ((month === 9 && day >= 25) || (month === 10 && day <= 5)) return 'f56';
+
+    // 3. Swedish National Day (June 6) -> Blue/Yellow -> Use Blue (F54 or R52)
+    if (month === 5 && day === 6) return 'f54';
+
+    // 4. Easter (Approx March/April) -> Yellow (R56)
+    // Heuristic: Late March to April
+    if (month === 3) return 'r56';
+
+    // 5. Midsummer (Late June) -> Green (Nature) -> F56 LCI
+    if (month === 5 && day >= 19 && day <= 26) return 'f56lci';
+
+    // 6. Summer Season (July - Aug) -> Convertible (R52)
+    if (month === 6 || month === 7) return 'r52';
+
+    // 7. Winter/New Year (Jan - Feb) -> GP3 (Grey/Cold)
+    if (month === 0 || month === 1) return 'gp3';
+
+    return null; 
+};
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Dark mode is device specific, keep in localStorage
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -125,6 +156,31 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return MODELS.some(m => m.id === saved) ? (saved as MiniModel) : 'r53';
   });
 
+  // Check for Auto-Theme Setting on Mount
+  useEffect(() => {
+    if (isDemoMode) return;
+
+    const checkAutoTheme = async () => {
+        const { data } = await supabase
+            .from('app_settings')
+            .select('value')
+            .eq('key', 'auto_theme_switching')
+            .maybeSingle();
+
+        if (data?.value === 'true') {
+            const seasonalTheme = getSeasonalTheme();
+            if (seasonalTheme) {
+                console.log(`[Theme] Auto-switching to seasonal theme: ${seasonalTheme}`);
+                setModelState(seasonalTheme);
+                // We do NOT save to localStorage here to avoid overwriting user preference permanently
+                // if they turn off the auto-switch later.
+            }
+        }
+    };
+
+    checkAutoTheme();
+  }, []);
+
   // 1. Listen for Auth Changes to load User Preference from Supabase
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -137,7 +193,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 .single();
             
             if (data?.car_model) {
-                // If DB has a valid model, use it
+                // If DB has a valid model, use it (This might override Auto-Theme if user specifically logs in)
                 if (MODELS.some(m => m.id === data.car_model)) {
                     setModelState(data.car_model as MiniModel);
                     localStorage.setItem('nmcs_car_model', data.car_model);
