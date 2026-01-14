@@ -1,4 +1,5 @@
 
+
 export type Json =
   | string
   | number
@@ -127,6 +128,7 @@ export interface UserProfile {
   email: string;
   username?: string;
   role: 'admin' | 'user' | 'board';
-  board_role?: 'Ordförande' | 'Kassör' | 'Teknikansvarig/Ledamot' | 'Ledamot' | 'Suppleant' | null;
+  board_role?: string | null; // Changed to string | null to match Supabase TEXT column
   car_model?: string;
+  full_name?: string;
 }

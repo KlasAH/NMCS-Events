@@ -36,7 +36,7 @@ const Profile: React.FC = () => {
 
     const [loadingData, setLoadingData] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'warning' | 'error', text: string } | null>(null);
+    const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'warning' | 'error', text: string, detail?: string } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
 
     // Password State
@@ -71,8 +71,9 @@ const Profile: React.FC = () => {
                         full_name: data.full_name || session.user.user_metadata?.full_name || '',
                         username: data.username || session.user.user_metadata?.username || '',
                         email: data.email || session.user.email || '',
-                        board_role: data.board_role || '', // This maps to 'board_role' column (Title)
-                        system_role: data.role || 'user'   // This maps to 'role' column (Permissions)
+                        // Map board_role safely. If DB has NULL, we default to ''.
+                        board_role: data.board_role || '', 
+                        system_role: data.role || 'user'
                     });
                     
                     if (data.car_model && MODELS.some(m => m.id === data.car_model)) {
@@ -132,14 +133,12 @@ const Profile: React.FC = () => {
             });
 
             // Prepare Data
-            // We consciously map 'board_role' state to 'board_role' column.
-            // The 'role' column is intentionally excluded from updates here as it's admin-managed.
             const profileData = {
                 id: session.user.id,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
-                board_role: formData.board_role, 
+                board_role: formData.board_role || null, // Send explicit null if empty
                 car_model: model,
                 updated_at: new Date().toISOString(),
             };
@@ -148,28 +147,39 @@ const Profile: React.FC = () => {
                 setTimeout(() => reject(new Error('Request timed out. Database might be waking up.')), 30000)
             );
 
-            // 1. Attempt Primary Save
-            let { error: profileError } = await Promise.race([
+            // 1. ATTEMPT FULL SAVE
+            // We use 'let' to allow error handling flow
+            let saveResult = await Promise.race([
                 scopedClient.from('profiles').upsert(profileData),
                 timeoutPromise
             ]) as any;
 
-            // 2. Fallback: If 'board_role' causes issues (cache mismatch), save without it.
-            if (profileError && (profileError.message?.includes('board_role') || profileError.message?.includes('does not exist'))) {
-                 console.warn("[Profile] 'board_role' column issue. Saving basic info only.");
+            let finalError = saveResult.error;
+
+            // 2. AGGRESSIVE FALLBACK
+            // If ANY error occurred (Schema mismatch, RLS, Cache issues), try saving without 'board_role'
+            if (finalError) {
+                 console.warn("[Profile] Full save failed. Attempting partial save.", finalError.message);
                  
+                 // Remove board_role from payload
                  const { board_role, ...safeData } = profileData;
-                 const { error: retryError } = await scopedClient.from('profiles').upsert(safeData);
                  
-                 if (!retryError) {
-                     profileError = null; // Suppress error because primary data is saved
+                 const safeResult = await Promise.race([
+                    scopedClient.from('profiles').upsert(safeData),
+                    timeoutPromise
+                 ]) as any;
+
+                 if (!safeResult.error) {
+                     finalError = null; // Success! We recovered.
                      partialSuccess = true;
                  } else {
-                     profileError = retryError;
+                     // If safe save ALSO failed, we keep the original error or the new one
+                     console.error("[Profile] Partial save also failed.", safeResult.error);
+                     finalError = safeResult.error;
                  }
             }
 
-            if (profileError) throw new Error(profileError.message || 'Profile save failed');
+            if (finalError) throw new Error(finalError.message || 'Profile save failed');
 
             // 3. Update Password if provided
             if (newPassword) {
@@ -183,8 +193,11 @@ const Profile: React.FC = () => {
             }
 
             if (partialSuccess) {
-                // We show success but log the warning to console/internal state
-                setStatusMsg({ type: 'warning', text: 'Profile saved! (Note: Board Title not updated due to DB sync)' });
+                setStatusMsg({ 
+                    type: 'warning', 
+                    text: 'Profile saved! (Board Title pending DB sync)',
+                    detail: 'Your main details are saved. The "Board Role" field failed to sync likely due to a database cache delay. It will work automatically later.'
+                });
             } else {
                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
             }
@@ -192,12 +205,14 @@ const Profile: React.FC = () => {
         } catch (error: any) {
             console.error("Save Error:", error);
             let errorMessage = error.message || 'An unexpected error occurred.';
-            
+            let detail = '';
+
             if (errorMessage.includes('board_role') || errorMessage.includes('schema cache')) {
-                errorMessage = "Database Sync Error. Click 'Fix Database' below.";
+                errorMessage = "Database Sync Error.";
+                detail = "The database schema is out of sync with the application. Please click 'Fix Database' below to force a schema reload.";
             }
 
-            setStatusMsg({ type: 'error', text: errorMessage });
+            setStatusMsg({ type: 'error', text: errorMessage, detail });
         } finally {
             setSaving(false);
         }
@@ -230,22 +245,28 @@ const Profile: React.FC = () => {
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: 'auto', opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}
-                            className={`w-full px-6 py-3 flex flex-col md:flex-row items-center justify-center gap-2 font-bold text-sm 
+                            className={`w-full px-6 py-4 flex flex-col items-center text-center gap-1 font-bold text-sm 
                                 ${statusMsg.type === 'success' ? 'bg-green-100 text-green-800' : 
-                                  statusMsg.type === 'warning' ? 'bg-yellow-100 text-yellow-800' : 
-                                  'bg-red-100 text-red-800'}`}
+                                  statusMsg.type === 'warning' ? 'bg-yellow-50 text-yellow-800 border-b border-yellow-100' : 
+                                  'bg-red-50 text-red-800 border-b border-red-100'}`}
                         >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 justify-center">
                                 {statusMsg.type === 'success' ? <CheckCircle size={18}/> : statusMsg.type === 'warning' ? <AlertCircle size={18}/> : <AlertCircle size={18}/>}
                                 {statusMsg.text}
                             </div>
-                            {/* Only show Fix button if it's a hard error */}
-                            {statusMsg.type === 'error' && (
+                            
+                            {/* Detail Message */}
+                            {statusMsg.detail && (
+                                <p className="text-xs font-normal opacity-80 max-w-lg mt-1">{statusMsg.detail}</p>
+                            )}
+
+                            {/* FIX BUTTON for Database Errors or Warnings */}
+                            {(statusMsg.type === 'error' || statusMsg.type === 'warning') && (
                                 <button 
                                     onClick={() => setShowFixer(true)}
-                                    className="mt-2 md:mt-0 ml-0 md:ml-4 flex items-center gap-1 bg-white text-red-600 px-3 py-1 rounded-full text-xs hover:bg-red-50 shadow-sm border border-red-200 transition-colors"
+                                    className="mt-3 flex items-center gap-1 bg-white text-slate-700 px-4 py-1.5 rounded-full text-xs hover:bg-slate-100 shadow-sm border border-slate-200 transition-colors font-bold"
                                 >
-                                    <Wrench size={12} /> Fix Database
+                                    <Wrench size={12} /> Open Database Fixer
                                 </button>
                             )}
                         </motion.div>
