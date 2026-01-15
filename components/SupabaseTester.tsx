@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search, Loader2, ClipboardCopy } from 'lucide-react';
@@ -202,7 +201,7 @@ type DiagnosticStep = {
 async function withTimeout<T>(promise: PromiseLike<T>, ms = 8000): Promise<T> {
     let timer: any;
     const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Timeout (8s)')), ms);
+        timer = setTimeout(() => reject(new Error(`Timeout (${ms}ms)`)), ms);
     });
     try {
         const result = await Promise.race([Promise.resolve(promise), timeout]);
@@ -260,6 +259,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         try {
             // 1. Env & Config
             updateStep('env', 'running');
+            await new Promise(r => setTimeout(r, 200)); // UI Breath
             
             if (!finalUrl || !finalKey) {
                  updateStep('env', 'error', 'Missing URL/Key');
@@ -305,12 +305,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             try {
                 // Simple query that doesn't need table access, just system health check logic
                 // Using auth.getSession is a good lightweight check
-                const { data, error } = await supabase.auth.getSession();
+                // WRAPPED IN TIMEOUT TO PREVENT HANG
+                const { data, error } = await withTimeout(supabase.auth.getSession(), 5000);
                 if (error) throw error;
                 updateStep('client', 'success', 'Session Checked');
                 log('Supabase Client (Auth) Connected OK', 'success');
             } catch (e: any) {
-                updateStep('client', 'error', e.message);
+                updateStep('client', 'error', e.message || 'Timeout');
                 log(`Client Connect Failed: ${e.message}`, 'error');
             }
 
