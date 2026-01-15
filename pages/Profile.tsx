@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -58,12 +59,8 @@ const Profile: React.FC = () => {
         const fetchProfile = async () => {
             try {
                 // 1. Fetch profile data (Basic info + Profile Role)
-                const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
                 
-                if (error) {
-                    console.error('Error fetching profile:', error);
-                }
-
                 // 2. Determine System Role (Check Fallback Table 'user_roles' if profile says user)
                 let finalRole = profile?.role || 'user';
                 
@@ -80,7 +77,6 @@ const Profile: React.FC = () => {
                         full_name: profile.full_name || session.user.user_metadata?.full_name || '',
                         username: profile.username || session.user.user_metadata?.username || '',
                         email: profile.email || session.user.email || '',
-                        // Map board_role safely. If DB has NULL, we default to ''.
                         board_role: profile.board_role || '', 
                         system_role: finalRole
                     });
@@ -114,89 +110,52 @@ const Profile: React.FC = () => {
     };
 
     const handleSaveAll = async () => {
-        if (!session?.user?.id) {
-            setStatusMsg({ type: 'error', text: 'No active session. Please log in again.' });
-            return;
-        }
+        if (!session?.user?.id) return;
 
         setSaving(true);
         setStatusMsg(null);
-        let partialSuccess = false;
         
         try {
             if (isDemoMode) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 800));
                 setStatusMsg({ type: 'success', text: 'Data stored locally (Demo Mode)' });
                 setSaving(false);
                 return;
             }
 
-            // Prepare Data
-            const profileData: any = {
+            // 1. CREATE STATELESS CLIENT
+            // This bypasses any connection issues with the global singleton
+            const tempClient = createClient(finalUrl, finalKey, {
+                global: {
+                    headers: { Authorization: `Bearer ${session.access_token}` }
+                },
+                auth: { persistSession: false }
+            });
+
+            // 2. PREPARE DATA
+            const profileData = {
                 id: session.user.id,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
                 car_model: model,
+                board_role: formData.board_role || null, // Ensure null if empty
                 updated_at: new Date().toISOString(),
             };
 
-            // Only add board_role if it has a value, to avoid sending nulls to missing columns
-            if (formData.board_role) {
-                profileData.board_role = formData.board_role;
-            }
-
-            // TIMEOUT PROMISE: Prevent infinite hanging
+            // 3. EXECUTE UPSERT (Atomic Update/Insert)
+            // Using a timeout race condition to ensure UI doesn't freeze
+            const savePromise = tempClient.from('profiles').upsert(profileData);
             const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Request timed out. Check internet connection.')), 10000)
+                setTimeout(() => reject(new Error('Connection timed out. Check network.')), 15000)
             );
 
-            // 1. ATTEMPT PRIMARY SAVE (Update)
-            const saveOperation = async () => {
-                let finalError: any = null;
+            // @ts-ignore
+            const { error } = await Promise.race([savePromise, timeoutPromise]);
 
-                // Try standard update first
-                const { error: updateError } = await supabase
-                    .from('profiles')
-                    .update(profileData)
-                    .eq('id', session.user.id);
+            if (error) throw error;
 
-                if (updateError) {
-                     console.warn("[Profile] Update failed, attempting fallback...", updateError.message);
-                     
-                     // Fallback 1: Try stripping board_role (in case column doesn't exist)
-                     const { board_role, ...safeData } = profileData;
-                     
-                     const { error: safeError } = await supabase
-                        .from('profiles')
-                        .update(safeData)
-                        .eq('id', session.user.id);
-
-                     if (!safeError) {
-                         finalError = null;
-                         partialSuccess = true;
-                     } else {
-                         // Fallback 2: Try Upsert (Insert if not exists)
-                         console.warn("[Profile] Update failed. Trying UPSERT.", safeError.message);
-                         const { error: upsertError } = await supabase.from('profiles').upsert(safeData);
-                         
-                         if (!upsertError) {
-                             finalError = null;
-                             partialSuccess = true;
-                         } else {
-                             finalError = upsertError;
-                         }
-                     }
-                }
-                return finalError;
-            };
-
-            // Race the save against the timeout
-            const errorResult = await Promise.race([saveOperation(), timeoutPromise]);
-
-            if (errorResult) throw errorResult;
-
-            // 3. Update Password if provided
+            // 4. Update Password (Optional)
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 const { error: pwError } = await updatePassword(newPassword);
@@ -204,28 +163,17 @@ const Profile: React.FC = () => {
                 setNewPassword('');
             }
 
-            if (partialSuccess) {
-                setStatusMsg({ 
-                    type: 'warning', 
-                    text: 'Profile saved! (Board Title pending DB sync)',
-                    detail: 'Your main details are saved. The "Board Role" field failed to sync likely due to a database cache delay. It will work automatically later.'
-                });
-            } else {
-                setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
-            }
+            setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
 
         } catch (error: any) {
             console.error("Save Error:", error);
             let errorMessage = error.message || 'An unexpected error occurred.';
             let detail = error.message;
 
-            // Enhanced Error Detection
-            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache') || errorMessage.includes('does not exist')) {
-                errorMessage = "Database Sync Error.";
-                detail = "The 'board_role' column is not recognized by the API. This requires a Schema Reload in Supabase.";
-            } else if (errorMessage.includes('timed out')) {
-                errorMessage = "Connection Timeout";
-                detail = "The server is taking too long to respond. Your changes might not have been saved.";
+            // Database Schema mismatch detection
+            if (errorMessage.includes('board_role') || errorMessage.includes('column')) {
+                errorMessage = "Database Schema Mismatch";
+                detail = "The database is missing columns. Please run the fixer.";
             }
 
             setStatusMsg({ type: 'error', text: errorMessage, detail });
@@ -267,12 +215,12 @@ const Profile: React.FC = () => {
                                   'bg-red-50 text-red-800 border-b border-red-100'}`}
                         >
                             <div className="flex items-center gap-2 justify-center">
-                                {statusMsg.type === 'success' ? <CheckCircle size={18}/> : statusMsg.type === 'warning' ? <AlertCircle size={18}/> : <AlertCircle size={18}/>}
+                                {statusMsg.type === 'success' ? <CheckCircle size={18}/> : <AlertCircle size={18}/>}
                                 {statusMsg.text}
                             </div>
                             
                             {/* Detail Message */}
-                            {statusMsg.detail && (
+                            {statusMsg.detail && statusMsg.type === 'error' && (
                                 <p className="text-xs font-normal opacity-80 max-w-lg mt-1 font-mono bg-white/50 px-2 py-1 rounded">{statusMsg.detail}</p>
                             )}
 
