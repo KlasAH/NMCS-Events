@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   role TEXT DEFAULT 'user',
   board_role TEXT,
   car_model TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 -- Idempotent column adds
@@ -75,6 +76,7 @@ BEGIN
     ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT;
     ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
     ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
 EXCEPTION
     WHEN duplicate_column THEN RAISE NOTICE 'Column already exists in profiles.';
 END $$;

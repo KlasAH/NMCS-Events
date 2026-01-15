@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
@@ -124,8 +125,6 @@ const Profile: React.FC = () => {
         setStatusMsg(null);
         
         // 1. TIMEOUT GUARD
-        // Create a timeout promise that rejects after 10 seconds.
-        // This ensures the UI never gets stuck in "Saving..." indefinitely.
         const timeoutGuard = new Promise((_, reject) => 
             setTimeout(() => reject(new Error("Connection timeout. Server took too long to respond.")), 10000)
         );
@@ -139,7 +138,6 @@ const Profile: React.FC = () => {
             }
 
             // 2. ISOLATED CLIENT
-            // We use a fresh client instance to avoid any state issues with the global singleton.
             const tempClient = createClient(finalUrl, finalKey, {
                 global: { headers: { Authorization: `Bearer ${session.access_token}` } },
                 auth: { persistSession: false }
@@ -162,14 +160,21 @@ const Profile: React.FC = () => {
                 const { error } = await tempClient.from('profiles').upsert(updates);
                 
                 if (error) {
-                    // DETECT SCHEMA MISMATCH (Missing 'board_role' column)
+                    // DETECT SCHEMA MISMATCH (Missing columns like 'updated_at' or 'board_role')
                     // Postgres error 42703 = undefined_column
-                    if (error.code === '42703' || error.message.includes('board_role')) {
-                        console.warn("[Profile] Schema mismatch detected. Retrying without board_role.");
+                    if (error.code === '42703') {
+                        console.warn("[Profile] Schema mismatch (Missing Column). Retrying with minimal fields.");
                         
-                        // Retry without the problematic column
-                        const { board_role, ...safeUpdates } = updates;
-                        const { error: retryError } = await tempClient.from('profiles').upsert(safeUpdates);
+                        // Retry with ABSOLUTE MINIMUM (No updated_at, No board_role)
+                        const minimalUpdates = {
+                            id: session.user.id,
+                            full_name: formData.full_name,
+                            username: formData.username,
+                            email: formData.email,
+                            car_model: model
+                        };
+                        
+                        const { error: retryError } = await tempClient.from('profiles').upsert(minimalUpdates);
                         
                         if (retryError) throw retryError;
                         
@@ -196,8 +201,8 @@ const Profile: React.FC = () => {
             if (result.partial) {
                  setStatusMsg({ 
                      type: 'warning', 
-                     text: "Saved, but 'Board Role' could not be synced.", 
-                     detail: "Your profile is saved, but the database schema is outdated. Please run the Fixer." 
+                     text: "Saved with warnings.", 
+                     detail: "Profile saved, but the database is outdated (missing columns). Please run the Fixer." 
                  });
             } else {
                  setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
