@@ -1,7 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
-import { supabase, isDemoMode } from '../lib/supabase';
-import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search, Loader2 } from 'lucide-react';
+import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
+import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search, Loader2, ClipboardCopy } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
@@ -192,16 +193,16 @@ NOTIFY pgrst, 'reload schema';
 type DiagnosticStep = {
     id: string;
     label: string;
-    status: 'pending' | 'running' | 'success' | 'error';
+    status: 'pending' | 'running' | 'success' | 'error' | 'warning';
     detail?: string;
     errorCode?: string;
 };
 
 // TIMEOUT HELPER to prevent getting stuck
-async function withTimeout<T>(promise: PromiseLike<T>, ms = 5000): Promise<T> {
+async function withTimeout<T>(promise: PromiseLike<T>, ms = 8000): Promise<T> {
     let timer: any;
     const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Timeout (5s)')), ms);
+        timer = setTimeout(() => reject(new Error('Timeout (8s)')), ms);
     });
     try {
         const result = await Promise.race([Promise.resolve(promise), timeout]);
@@ -231,16 +232,23 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         setConsoleLogs(prev => [{type, msg, time}, ...prev]);
     };
 
+    const copyLogs = () => {
+        const text = consoleLogs.map(l => `[${l.time}] ${l.type.toUpperCase()}: ${l.msg}`).join('\n');
+        navigator.clipboard.writeText(text);
+        log('Logs copied to clipboard', 'success');
+    };
+
     // --- AUTOMATED DIAGNOSTICS ---
     const runDiagnostics = async () => {
         setIsRunning(true);
         setConsoleLogs([]); 
         
         const initialSteps: DiagnosticStep[] = [
-            { id: 'env', label: 'Environment Config', status: 'pending' },
-            { id: 'network', label: 'Network Reachability', status: 'pending' },
-            { id: 'table', label: 'Table Access (connection_tests)', status: 'pending' },
-            { id: 'schema', label: 'Profile Schema Check', status: 'pending' },
+            { id: 'env', label: '1. Config Check (lib/supabase)', status: 'pending' },
+            { id: 'http', label: '2. Raw HTTP Reachability', status: 'pending' },
+            { id: 'client', label: '3. Supabase Client Connect', status: 'pending' },
+            { id: 'table', label: '4. Read Table (connection_tests)', status: 'pending' },
+            { id: 'schema', label: '5. Schema Verification', status: 'pending' },
         ];
         setSteps(initialSteps);
 
@@ -250,59 +258,91 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         };
 
         try {
-            // 1. Env
+            // 1. Env & Config
             updateStep('env', 'running');
-            // @ts-ignore
-            const url = import.meta.env.VITE_SUPABASE_URL;
-            // @ts-ignore
-            const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
             
-            if (!url || !key) {
-                 updateStep('env', 'error', 'Missing ENV variables');
+            if (!finalUrl || !finalKey) {
+                 updateStep('env', 'error', 'Missing URL/Key');
+                 log('Config Error: Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY', 'error');
                  throw new Error('Missing Env');
             }
-            updateStep('env', 'success', `URL: ${url.substring(0, 15)}...`);
-
-            // 2. Network
-            updateStep('network', 'running');
-            try {
-                const start = Date.now();
-                // Wrap in timeout
-                const { error } = await withTimeout(
-                    supabase.from('connection_tests').select('id', { count: 'exact', head: true })
-                );
-                
-                if (error && error.message.includes('fetch')) throw error;
-                updateStep('network', 'success', `${Date.now() - start}ms`);
-            } catch (e: any) {
-                updateStep('network', 'error', e.message || 'Timeout');
-                throw e; // Stop here
+            if (finalUrl.includes('placeholder')) {
+                 updateStep('env', 'warning', 'Using Placeholder/Demo');
+                 log('Warning: App is in Demo Mode (Placeholder URL)', 'info');
+            } else {
+                 updateStep('env', 'success', `URL: ${finalUrl.substring(0, 20)}...`);
+                 log(`Config Loaded: URL=${finalUrl}`, 'info');
             }
 
-            // 3. Table Access
+            // 2. Raw HTTP Reachability (Bypasses Client)
+            updateStep('http', 'running');
+            try {
+                const controller = new AbortController();
+                const id = setTimeout(() => controller.abort(), 5000);
+                const res = await fetch(`${finalUrl}/rest/v1/`, { 
+                    method: 'GET',
+                    headers: { 'apikey': finalKey },
+                    signal: controller.signal 
+                });
+                clearTimeout(id);
+                
+                if (res.ok || res.status === 404) {
+                    // 404 is fine for root, means server replied
+                    updateStep('http', 'success', `Status: ${res.status}`);
+                    log(`Raw HTTP Success: Status ${res.status}`, 'success');
+                } else {
+                    updateStep('http', 'error', `HTTP ${res.status}`);
+                    log(`Raw HTTP Error: ${res.status} ${res.statusText}`, 'error');
+                }
+            } catch (e: any) {
+                updateStep('http', 'error', e.name === 'AbortError' ? 'Timeout' : 'Network Fail');
+                log(`Raw HTTP Failed: ${e.message}`, 'error');
+                // If raw HTTP fails, client will likely fail too, but we continue to show that
+            }
+
+            // 3. Client Connection
+            updateStep('client', 'running');
+            try {
+                // Simple query that doesn't need table access, just system health check logic
+                // Using auth.getSession is a good lightweight check
+                const { data, error } = await supabase.auth.getSession();
+                if (error) throw error;
+                updateStep('client', 'success', 'Session Checked');
+                log('Supabase Client (Auth) Connected OK', 'success');
+            } catch (e: any) {
+                updateStep('client', 'error', e.message);
+                log(`Client Connect Failed: ${e.message}`, 'error');
+            }
+
+            // 4. Table Access
             updateStep('table', 'running');
             const { error: tableError } = await withTimeout(
                 supabase.from('connection_tests').select('id').limit(1)
             );
             if (tableError) {
                  updateStep('table', 'error', tableError.message, tableError.code);
+                 log(`Table Read Failed: ${tableError.message} (${tableError.code})`, 'error');
             } else {
                  updateStep('table', 'success', 'Read OK');
+                 log('Table Read Success (connection_tests)', 'success');
             }
 
-            // 4. Schema
+            // 5. Schema
             updateStep('schema', 'running');
             const { error: schemaError } = await withTimeout(
                 supabase.from('profiles').select('board_role, updated_at').limit(1)
             );
             if (schemaError) {
                  updateStep('schema', 'error', 'Missing Columns?', schemaError.code);
+                 log(`Schema Check Failed: ${schemaError.message}`, 'error');
             } else {
                  updateStep('schema', 'success', 'Columns Exist');
+                 log('Schema Verification Passed', 'success');
             }
 
-        } catch (e) {
+        } catch (e: any) {
             console.error("Diagnostic Halt", e);
+            log(`Diagnostics Halted: ${e.message}`, 'error');
         } finally {
             setIsRunning(false);
         }
@@ -470,9 +510,11 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                                             <span className="font-medium">{s.label}</span>
                                             <div className="flex items-center gap-2">
                                                 {s.status === 'error' && <span className="text-xs text-red-500 font-mono">{s.detail} (Code: {s.errorCode})</span>}
+                                                {s.status === 'warning' && <span className="text-xs text-yellow-600 font-mono">{s.detail}</span>}
                                                 {s.status === 'success' && <span className="text-xs text-green-600">{s.detail || 'OK'}</span>}
                                                 {s.status === 'running' && <RefreshCw size={12} className="animate-spin text-blue-500"/>}
                                                 {s.status === 'error' && <X size={14} className="text-red-500"/>}
+                                                {s.status === 'warning' && <AlertCircle size={14} className="text-yellow-500"/>}
                                                 {s.status === 'success' && <Check size={14} className="text-green-500"/>}
                                             </div>
                                         </div>
@@ -542,28 +584,31 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     )}
 
                     {/* CONSOLE LOG OUTPUT */}
-                    {(activeTab === 'manual' || activeTab === 'profile') && (
-                        <div className="mt-6 bg-slate-950 text-slate-300 p-4 rounded-xl font-mono text-xs h-40 overflow-y-auto border border-slate-800 shadow-inner">
-                            <div className="flex justify-between items-center mb-2 border-b border-slate-800 pb-2">
-                                <span className="font-bold text-slate-500">CONSOLE OUTPUT</span>
-                                <button onClick={() => setConsoleLogs([])} className="text-slate-500 hover:text-white">Clear</button>
+                    <div className="mt-6 bg-slate-950 text-slate-300 p-4 rounded-xl font-mono text-xs h-48 overflow-y-auto border border-slate-800 shadow-inner relative group">
+                        <div className="flex justify-between items-center mb-2 border-b border-slate-800 pb-2 sticky top-0 bg-slate-950/90 backdrop-blur-sm z-10">
+                            <span className="font-bold text-slate-500">CONSOLE OUTPUT</span>
+                            <div className="flex gap-2">
+                                <button onClick={copyLogs} className="flex items-center gap-1 text-slate-500 hover:text-white transition-colors" title="Copy to Clipboard">
+                                    <ClipboardCopy size={12} /> Copy
+                                </button>
+                                <button onClick={() => setConsoleLogs([])} className="text-slate-500 hover:text-white transition-colors">Clear</button>
                             </div>
-                            {consoleLogs.length === 0 ? (
-                                <span className="opacity-30 italic">Waiting for input...</span>
-                            ) : (
-                                consoleLogs.map((l, i) => (
-                                    <div key={i} className={`mb-1 ${
-                                        l.type === 'error' ? 'text-red-400' : 
-                                        l.type === 'success' ? 'text-green-400' : 
-                                        'text-slate-300'
-                                    }`}>
-                                        <span className="opacity-50 mr-2">[{l.time}]</span>
-                                        {l.msg}
-                                    </div>
-                                ))
-                            )}
                         </div>
-                    )}
+                        {consoleLogs.length === 0 ? (
+                            <span className="opacity-30 italic block mt-2">Waiting for input...</span>
+                        ) : (
+                            consoleLogs.map((l, i) => (
+                                <div key={i} className={`mb-1 break-all ${
+                                    l.type === 'error' ? 'text-red-400' : 
+                                    l.type === 'success' ? 'text-green-400' : 
+                                    'text-slate-300'
+                                }`}>
+                                    <span className="opacity-50 mr-2">[{l.time}]</span>
+                                    {l.msg}
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>
             </div>
         </Modal>
