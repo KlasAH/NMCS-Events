@@ -147,35 +147,43 @@ const Profile: React.FC = () => {
                 setTimeout(() => reject(new Error('Request timed out. Database might be waking up.')), 30000)
             );
 
-            // 1. ATTEMPT FULL SAVE
-            // We use 'let' to allow error handling flow
-            let saveResult = await Promise.race([
-                scopedClient.from('profiles').upsert(profileData),
+            // 1. ATTEMPT PRIMARY SAVE (Update)
+            // Use UPDATE first since row exists. Upsert can sometimes trigger permission issues on INSERT policies.
+            let { error: updateError } = await Promise.race([
+                scopedClient.from('profiles').update(profileData).eq('id', session.user.id),
                 timeoutPromise
             ]) as any;
 
-            let finalError = saveResult.error;
+            let finalError = updateError;
 
             // 2. AGGRESSIVE FALLBACK
-            // If ANY error occurred (Schema mismatch, RLS, Cache issues), try saving without 'board_role'
+            // If UPDATE failed, check if it's the specific board_role issue or general failure
             if (finalError) {
                  console.warn("[Profile] Full save failed. Attempting partial save.", finalError.message);
                  
-                 // Remove board_role from payload
+                 // Remove board_role from payload to attempt partial save
                  const { board_role, ...safeData } = profileData;
                  
-                 const safeResult = await Promise.race([
-                    scopedClient.from('profiles').upsert(safeData),
+                 // Try UPDATE again without the problematic column
+                 const { error: safeError } = await Promise.race([
+                    scopedClient.from('profiles').update(safeData).eq('id', session.user.id),
                     timeoutPromise
                  ]) as any;
 
-                 if (!safeResult.error) {
+                 if (!safeError) {
                      finalError = null; // Success! We recovered.
                      partialSuccess = true;
                  } else {
-                     // If safe save ALSO failed, we keep the original error or the new one
-                     console.error("[Profile] Partial save also failed.", safeResult.error);
-                     finalError = safeResult.error;
+                     // If UPDATE fails entirely, maybe row doesn't exist? Try UPSERT as last resort.
+                     console.warn("[Profile] Partial update failed. Trying UPSERT.", safeError.message);
+                     const { error: upsertError } = await scopedClient.from('profiles').upsert(safeData);
+                     
+                     if (!upsertError) {
+                         finalError = null;
+                         partialSuccess = true;
+                     } else {
+                         finalError = upsertError;
+                     }
                  }
             }
 
@@ -205,11 +213,11 @@ const Profile: React.FC = () => {
         } catch (error: any) {
             console.error("Save Error:", error);
             let errorMessage = error.message || 'An unexpected error occurred.';
-            let detail = '';
+            let detail = error.message;
 
-            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache')) {
+            if (errorMessage.includes('board_role') || errorMessage.includes('schema cache') || errorMessage.includes('does not exist')) {
                 errorMessage = "Database Sync Error.";
-                detail = "The database schema is out of sync with the application. Please click 'Fix Database' below to force a schema reload.";
+                detail = "The 'board_role' column is not recognized by the API. This requires a Schema Reload in Supabase.";
             }
 
             setStatusMsg({ type: 'error', text: errorMessage, detail });
@@ -257,16 +265,16 @@ const Profile: React.FC = () => {
                             
                             {/* Detail Message */}
                             {statusMsg.detail && (
-                                <p className="text-xs font-normal opacity-80 max-w-lg mt-1">{statusMsg.detail}</p>
+                                <p className="text-xs font-normal opacity-80 max-w-lg mt-1 font-mono bg-white/50 px-2 py-1 rounded">{statusMsg.detail}</p>
                             )}
 
-                            {/* FIX BUTTON for Database Errors or Warnings */}
+                            {/* FIX BUTTON - ALWAYS VISIBLE ON ERROR */}
                             {(statusMsg.type === 'error' || statusMsg.type === 'warning') && (
                                 <button 
                                     onClick={() => setShowFixer(true)}
-                                    className="mt-3 flex items-center gap-1 bg-white text-slate-700 px-4 py-1.5 rounded-full text-xs hover:bg-slate-100 shadow-sm border border-slate-200 transition-colors font-bold"
+                                    className="mt-3 flex items-center gap-2 bg-mini-black dark:bg-white text-white dark:text-black px-6 py-2 rounded-full text-xs hover:opacity-90 shadow-lg border-2 border-transparent transition-all font-bold animate-pulse"
                                 >
-                                    <Wrench size={12} /> Open Database Fixer
+                                    <Wrench size={14} /> Open Database Fixer
                                 </button>
                             )}
                         </motion.div>
