@@ -2,15 +2,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
-import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu } from 'lucide-react';
+import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search } from 'lucide-react';
 import Modal from './Modal';
+import { useAuth } from '../context/AuthContext';
 
 interface SupabaseTesterProps {
     isOpen: boolean;
     onClose: () => void;
 }
 
-// SQL Fix Script - Updated to ensure idempotency and robustness
+// SQL Fix Script
 const FIX_SQL = `
 -- 1. UTILITIES & EXTENSIONS
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -95,8 +96,6 @@ CREATE POLICY "Admin settings write" ON public.app_settings FOR ALL USING (is_ad
 NOTIFY pgrst, 'reload schema';
 `;
 
-const RELOAD_SQL = `NOTIFY pgrst, 'reload schema';`;
-
 // Diagnostic Step Definition
 type DiagnosticStep = {
     id: string;
@@ -107,37 +106,32 @@ type DiagnosticStep = {
 };
 
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
+    const { session } = useAuth();
+    const [activeTab, setActiveTab] = useState<'auto' | 'manual' | 'profile'>('auto');
+    
+    // Auto Diag State
     const [isRunning, setIsRunning] = useState(false);
     const [steps, setSteps] = useState<DiagnosticStep[]>([]);
     const [copied, setCopied] = useState(false);
-    
-    // --- DIAGNOSTIC LOGIC ---
 
-    const getEnvVars = () => {
-        let url = '';
-        let key = '';
-        try {
-            // @ts-ignore
-            if (import.meta.env) {
-                // @ts-ignore
-                url = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/$/, '');
-                // @ts-ignore
-                key = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').trim();
-            }
-        } catch (e) { console.error(e); }
-        return { url, key };
+    // Manual / Profile Log State
+    const [consoleLogs, setConsoleLogs] = useState<{type: 'info'|'error'|'success', msg: string, time: string}[]>([]);
+
+    const log = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
+        const time = new Date().toLocaleTimeString();
+        setConsoleLogs(prev => [{type, msg, time}, ...prev]);
     };
 
+    // --- AUTOMATED DIAGNOSTICS ---
     const runDiagnostics = async () => {
         setIsRunning(true);
+        setConsoleLogs([]); // Clear logs on re-run
         
-        // Reset Steps
         const initialSteps: DiagnosticStep[] = [
-            { id: 'env', label: 'Environment Configuration', status: 'pending' },
+            { id: 'env', label: 'Environment Config', status: 'pending' },
             { id: 'network', label: 'Network Reachability', status: 'pending' },
-            { id: 'table', label: 'Diagnostic Table Check', status: 'pending' },
-            { id: 'write', label: 'Write Permissions', status: 'pending' },
-            { id: 'schema', label: 'Profile Schema Validation', status: 'pending' },
+            { id: 'table', label: 'Table Access (connection_tests)', status: 'pending' },
+            { id: 'schema', label: 'Profile Schema Check', status: 'pending' },
         ];
         setSteps(initialSteps);
 
@@ -146,117 +140,139 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return status === 'success';
         };
 
-        // 1. ENV CHECK
+        // 1. Env
         updateStep('env', 'running');
-        const { url, key } = getEnvVars();
-        if (!url || !key || url.includes('placeholder')) {
-            updateStep('env', 'error', 'Missing VITE_SUPABASE_URL or Key');
-            setIsRunning(false);
-            return;
+        // @ts-ignore
+        const url = import.meta.env.VITE_SUPABASE_URL;
+        // @ts-ignore
+        const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        if (!url || !key) {
+             updateStep('env', 'error', 'Missing ENV variables');
+             setIsRunning(false); return;
         }
-        updateStep('env', 'success', `Connected to: ${url.substring(8, 25)}...`);
+        updateStep('env', 'success', `URL: ${url.substring(0, 15)}...`);
 
-        if (isDemoMode) {
-            await new Promise(r => setTimeout(r, 500));
-            updateStep('network', 'success', 'Demo Mode');
-            updateStep('table', 'success', 'Demo Mode');
-            updateStep('write', 'success', 'Demo Mode');
-            updateStep('schema', 'success', 'Demo Mode');
-            setIsRunning(false);
-            return;
-        }
-
-        // Create isolated client
-        const testClient = createClient(url, key, {
-            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-            global: { headers: { 'x-client-info': 'nmcs-tester' } }
-        });
-
-        // 2. NETWORK CHECK (Fastest possible ping)
+        // 2. Network
         updateStep('network', 'running');
         try {
-            // "HEAD" request via select count is effectively a ping
             const start = Date.now();
-            const { error } = await testClient.from('connection_tests').select('id', { count: 'exact', head: true });
-            
-            // We ignore table errors here; we just care if the SERVER responded
-            if (error && error.code === undefined && error.message.includes('fetch')) {
-                 updateStep('network', 'error', 'Server unreachable. Check internet or URL.');
-                 setIsRunning(false);
-                 return;
-            }
-            const latency = Date.now() - start;
-            updateStep('network', 'success', `Latency: ${latency}ms`);
+            const { error } = await supabase.from('connection_tests').select('id', { count: 'exact', head: true });
+            if (error && error.message.includes('fetch')) throw error;
+            updateStep('network', 'success', `${Date.now() - start}ms`);
         } catch (e: any) {
-            updateStep('network', 'error', e.message);
-            setIsRunning(false);
-            return;
+            updateStep('network', 'error', 'Fetch failed');
+            setIsRunning(false); return;
         }
 
-        // 3. TABLE EXISTENCE
+        // 3. Table Access
         updateStep('table', 'running');
-        const { error: tableError } = await testClient.from('connection_tests').select('id').limit(1);
+        const { error: tableError } = await supabase.from('connection_tests').select('id').limit(1);
         if (tableError) {
-            if (tableError.code === '42P01') {
-                updateStep('table', 'error', 'Table missing.', '42P01');
-                updateStep('write', 'error', 'Cannot write to missing table.'); // Cascading fail
-                setIsRunning(false); // Stop here, need SQL fix
-                return;
-            } else if (tableError.code === '42501') {
-                updateStep('table', 'error', 'RLS Policy Violation (Access Denied).', '42501');
-                setIsRunning(false);
-                return;
-            }
-            updateStep('table', 'error', tableError.message, tableError.code);
-            setIsRunning(false);
-            return;
-        }
-        updateStep('table', 'success', 'Table "connection_tests" exists.');
-
-        // 4. WRITE CHECK
-        updateStep('write', 'running');
-        const testId = crypto.randomUUID();
-        const { error: writeError } = await testClient
-            .from('connection_tests')
-            .insert({ id: testId, message: 'Diagnostics Ping', response_data: 'OK' });
-        
-        if (writeError) {
-            updateStep('write', 'error', writeError.message, writeError.code);
-            setIsRunning(false);
-            return;
+             updateStep('table', 'error', tableError.message, tableError.code);
         } else {
-            // Cleanup (Fire and forget)
-            testClient.from('connection_tests').delete().eq('id', testId).then(() => {});
-            updateStep('write', 'success', 'Insert / Delete successful.');
+             updateStep('table', 'success', 'Read OK');
         }
 
-        // 5. PROFILE SCHEMA CHECK (The "Board Role" Fixer)
+        // 4. Schema
         updateStep('schema', 'running');
-        // We try to select the specific columns that were causing issues
-        const { error: schemaError } = await testClient
-            .from('profiles')
-            .select('board_role, role, car_model')
-            .limit(1);
-
+        const { error: schemaError } = await supabase.from('profiles').select('board_role, updated_at').limit(1);
         if (schemaError) {
-            if (schemaError.code === '42703') {
-                updateStep('schema', 'error', 'Missing columns (Schema Mismatch).', '42703');
-            } else if (schemaError.code === '42P01') {
-                updateStep('schema', 'error', 'Table "profiles" missing.', '42P01');
-            } else {
-                updateStep('schema', 'error', schemaError.message, schemaError.code);
-            }
+             updateStep('schema', 'error', 'Missing Columns?', schemaError.code);
         } else {
-            updateStep('schema', 'success', 'Profile columns verified.');
+             updateStep('schema', 'success', 'Columns Exist');
         }
 
         setIsRunning(false);
     };
 
-    // Auto-run on open
+    // Auto-run when opening modal
     useEffect(() => {
-        if (isOpen) runDiagnostics();
+        if (isOpen && activeTab === 'auto') runDiagnostics();
     }, [isOpen]);
+
+
+    // --- MANUAL TESTS ---
+    const manualTest = async (action: 'insert' | 'read' | 'update' | 'delete') => {
+        log(`Starting ${action.toUpperCase()} test on 'connection_tests'...`, 'info');
+        
+        try {
+            if (action === 'insert') {
+                const { data, error } = await supabase.from('connection_tests').insert({ 
+                    message: 'Manual Test', response_data: 'Clicked Button' 
+                }).select().single();
+                if (error) throw error;
+                log(`Insert Success! ID: ${data.id}`, 'success');
+            }
+            if (action === 'read') {
+                const { data, error } = await supabase.from('connection_tests').select('*').limit(3).order('created_at', {ascending:false});
+                if (error) throw error;
+                log(`Read Success! Found ${data.length} rows.`, 'success');
+                if(data.length > 0) log(`Row 1: ${JSON.stringify(data[0])}`, 'info');
+            }
+            if (action === 'update') {
+                // First get a row
+                const { data: rows } = await supabase.from('connection_tests').select('id').limit(1);
+                if (!rows || rows.length === 0) { log('No rows to update. Insert first.', 'error'); return; }
+                
+                const { error } = await supabase.from('connection_tests').update({ message: 'Updated ' + Date.now() }).eq('id', rows[0].id);
+                if (error) throw error;
+                log(`Update Success for ID: ${rows[0].id}`, 'success');
+            }
+            if (action === 'delete') {
+                const { error } = await supabase.from('connection_tests').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+                if (error) throw error;
+                log(`Delete All Success.`, 'success');
+            }
+        } catch (e: any) {
+            log(`${action.toUpperCase()} Failed: ${e.message} (Code: ${e.code || 'N/A'})`, 'error');
+        }
+    };
+
+    // --- PROFILE DEBUGGER ---
+    const profileDebug = async (action: 'read' | 'save_basic' | 'save_full') => {
+        if (!session?.user) {
+            log("No active session. Please log in first.", 'error');
+            return;
+        }
+
+        log(`Starting Profile ${action} check...`, 'info');
+
+        try {
+            if (action === 'read') {
+                const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                if (error) throw error;
+                log(`Read Profile Success!`, 'success');
+                log(JSON.stringify(data, null, 2), 'info');
+            }
+
+            if (action === 'save_basic') {
+                // Minimal save (safe columns)
+                const updates = { updated_at: new Date().toISOString() };
+                const { error } = await supabase.from('profiles').update(updates).eq('id', session.user.id);
+                if (error) throw error;
+                log(`Basic Save (updated_at) Success!`, 'success');
+            }
+
+            if (action === 'save_full') {
+                // Risky save (potentially missing columns)
+                const updates = { 
+                    updated_at: new Date().toISOString(),
+                    board_role: 'Tester',
+                    car_model: 'r53'
+                };
+                const { error } = await supabase.from('profiles').update(updates).eq('id', session.user.id);
+                if (error) throw error;
+                log(`Full Save (board_role, car_model) Success!`, 'success');
+            }
+
+        } catch (e: any) {
+            log(`Profile Error: ${e.message}`, 'error');
+            if (e.code === '42703') {
+                log("CRITICAL: Column missing in database. Run the Fix Script in 'Diagnostics' tab.", 'error');
+            }
+        }
+    };
 
     const copySql = () => {
         navigator.clipboard.writeText(FIX_SQL);
@@ -267,118 +283,146 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const hasError = steps.some(s => s.status === 'error');
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="System Diagnostics">
-            <div className="space-y-6">
-                {/* STATUS CARD */}
-                <div className={`p-6 rounded-2xl border-2 transition-colors ${
-                    isRunning ? 'bg-blue-50 border-blue-100 dark:bg-blue-900/10 dark:border-blue-900' :
-                    hasError ? 'bg-red-50 border-red-100 dark:bg-red-900/10 dark:border-red-900' :
-                    'bg-green-50 border-green-100 dark:bg-green-900/10 dark:border-green-900'
-                }`}>
-                    <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold flex items-center gap-2">
-                             {isRunning ? <RefreshCw className="animate-spin text-blue-600" /> : 
-                              hasError ? <ShieldAlert className="text-red-600" /> : 
-                              <CheckCircle2 className="text-green-600" />}
-                             
-                             {isRunning ? 'Running Diagnostics...' : 
-                              hasError ? 'System Issues Detected' : 
-                              'All Systems Operational'}
-                        </h3>
-                        {!isRunning && (
-                            <button 
-                                onClick={runDiagnostics}
-                                className="px-4 py-2 bg-white dark:bg-slate-800 rounded-lg text-sm font-bold shadow-sm hover:shadow-md transition-all flex items-center gap-2"
-                            >
-                                <Play size={14} /> Re-run
-                            </button>
-                        )}
-                    </div>
-
-                    <div className="space-y-3">
-                        {steps.map(step => (
-                            <div key={step.id} className="flex items-center justify-between p-3 bg-white/60 dark:bg-slate-900/40 rounded-xl border border-white/50 dark:border-white/5">
-                                <div className="flex items-center gap-3">
-                                    <div className={`p-1.5 rounded-full ${
-                                        step.status === 'pending' ? 'bg-slate-200 text-slate-400' :
-                                        step.status === 'running' ? 'bg-blue-100 text-blue-600 animate-pulse' :
-                                        step.status === 'error' ? 'bg-red-100 text-red-600' :
-                                        'bg-green-100 text-green-600'
-                                    }`}>
-                                        {step.status === 'running' ? <RefreshCw size={14} className="animate-spin" /> :
-                                         step.status === 'error' ? <X size={14} /> :
-                                         step.status === 'success' ? <Check size={14} /> :
-                                         <div className="w-3.5 h-3.5" />}
-                                    </div>
-                                    <span className={`text-sm font-bold ${
-                                        step.status === 'error' ? 'text-red-700 dark:text-red-400' : 
-                                        'text-slate-700 dark:text-slate-200'
-                                    }`}>
-                                        {step.label}
-                                    </span>
-                                </div>
-                                
-                                {step.detail && (
-                                    <div className="flex flex-col items-end">
-                                        <span className={`text-xs font-mono font-medium ${
-                                            step.status === 'error' ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded' : 
-                                            'text-slate-500'
-                                        }`}>
-                                            {step.detail}
-                                        </span>
-                                        {step.errorCode && (
-                                            <span className="text-[10px] text-slate-400 mt-0.5">Code: {step.errorCode}</span>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
+        <Modal isOpen={isOpen} onClose={onClose} title="Database & Connection Tools">
+            <div className="flex flex-col h-[70vh]">
+                
+                {/* TABS */}
+                <div className="flex gap-2 mb-4 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl shrink-0">
+                    <button 
+                        onClick={() => setActiveTab('auto')}
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'auto' ? 'bg-white dark:bg-slate-700 shadow-sm text-mini-black dark:text-white' : 'text-slate-500'}`}
+                    >
+                        Auto Diagnostics
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('manual')}
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'manual' ? 'bg-white dark:bg-slate-700 shadow-sm text-mini-black dark:text-white' : 'text-slate-500'}`}
+                    >
+                        Connection Lab
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('profile')}
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'profile' ? 'bg-white dark:bg-slate-700 shadow-sm text-mini-black dark:text-white' : 'text-slate-500'}`}
+                    >
+                        Profile Debug
+                    </button>
                 </div>
 
-                {/* ACTION AREA - Only show if errors exist */}
-                {hasError && (
-                    <div className="bg-slate-900 text-slate-200 p-5 rounded-2xl border border-slate-700 shadow-2xl relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                            <Terminal size={120} />
+                {/* CONTENT AREA */}
+                <div className="flex-grow overflow-y-auto custom-scrollbar px-1">
+                    
+                    {/* --- TAB 1: AUTO DIAGNOSTICS --- */}
+                    {activeTab === 'auto' && (
+                        <div className="space-y-6">
+                            <div className={`p-4 rounded-xl border-2 ${hasError ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'}`}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold flex items-center gap-2">
+                                        {isRunning ? <RefreshCw className="animate-spin"/> : hasError ? <ShieldAlert className="text-red-500"/> : <CheckCircle2 className="text-green-500"/>}
+                                        {isRunning ? 'Scanning...' : hasError ? 'Issues Found' : 'Systems Nominal'}
+                                    </h3>
+                                    {!isRunning && <button onClick={runDiagnostics} className="text-xs bg-white px-3 py-1 rounded shadow hover:bg-slate-50">Re-run</button>}
+                                </div>
+                                <div className="space-y-2">
+                                    {steps.map(s => (
+                                        <div key={s.id} className="flex justify-between items-center text-sm p-2 bg-white/50 rounded">
+                                            <span className="font-medium">{s.label}</span>
+                                            <div className="flex items-center gap-2">
+                                                {s.status === 'error' && <span className="text-xs text-red-500 font-mono">{s.detail} (Code: {s.errorCode})</span>}
+                                                {s.status === 'success' && <span className="text-xs text-green-600">{s.detail || 'OK'}</span>}
+                                                {s.status === 'running' && <RefreshCw size={12} className="animate-spin text-blue-500"/>}
+                                                {s.status === 'error' && <X size={14} className="text-red-500"/>}
+                                                {s.status === 'success' && <Check size={14} className="text-green-500"/>}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-slate-900 text-slate-300 p-4 rounded-xl border border-slate-700">
+                                <div className="flex justify-between items-center mb-2">
+                                    <h4 className="font-bold text-white flex items-center gap-2"><Cpu size={16}/> Auto-Fix Script</h4>
+                                    <button onClick={copySql} className="text-xs flex items-center gap-1 bg-mini-red text-white px-2 py-1 rounded hover:opacity-90">
+                                        {copied ? <Check size={12}/> : <Copy size={12}/>} Copy SQL
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-500 mb-2">If any errors appear above, copy this and run it in the Supabase SQL Editor.</p>
+                            </div>
                         </div>
-                        
-                        <div className="relative z-10">
-                            <h4 className="text-white font-bold text-lg mb-2 flex items-center gap-2">
-                                <Cpu className="text-mini-red" />
-                                Automated Repair Protocol
-                            </h4>
-                            <p className="text-sm text-slate-400 mb-6 max-w-md">
-                                Issues were detected with your database schema or permissions. 
-                                Execute the repair script to synchronize the database structure.
-                            </p>
+                    )}
 
-                            <div className="flex flex-col sm:flex-row gap-3">
-                                <a 
-                                    href="https://supabase.com/dashboard/project/_/sql/new" 
-                                    target="_blank" 
-                                    rel="noreferrer"
-                                    className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-bold transition-all shadow-lg shadow-blue-900/50"
-                                >
-                                    <ExternalLink size={18} /> Open SQL Editor
-                                </a>
-
-                                <button 
-                                    onClick={copySql}
-                                    className="flex items-center justify-center gap-2 bg-mini-red hover:bg-red-600 text-white px-5 py-3 rounded-xl font-bold transition-all shadow-lg shadow-red-900/50"
-                                >
-                                    {copied ? <Check size={18} /> : <Copy size={18} />}
-                                    {copied ? 'Script Copied!' : 'Copy Repair Script'}
+                    {/* --- TAB 2: CONNECTION LAB --- */}
+                    {activeTab === 'manual' && (
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={() => manualTest('insert')} className="p-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-blue-200">
+                                    <Plus size={20} /> Test Insert
+                                </button>
+                                <button onClick={() => manualTest('read')} className="p-3 bg-green-50 hover:bg-green-100 text-green-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-green-200">
+                                    <Search size={20} /> Test Read
+                                </button>
+                                <button onClick={() => manualTest('update')} className="p-3 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-yellow-200">
+                                    <Edit3 size={20} /> Test Update
+                                </button>
+                                <button onClick={() => manualTest('delete')} className="p-3 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-red-200">
+                                    <Trash2 size={20} /> Test Delete
                                 </button>
                             </div>
-                            
-                            <div className="mt-4 flex items-start gap-2 text-[10px] text-slate-500 bg-black/30 p-2 rounded">
-                                <AlertCircle size={12} className="mt-0.5" />
-                                <span>Paste the script into the Supabase SQL Editor and click "Run". Then come back here and click "Re-run".</span>
+                            <div className="text-xs text-slate-400 text-center">
+                                Operations target the <code>connection_tests</code> table.
                             </div>
                         </div>
-                    </div>
-                )}
+                    )}
+
+                    {/* --- TAB 3: PROFILE DEBUG --- */}
+                    {activeTab === 'profile' && (
+                        <div className="space-y-6">
+                            <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-center">
+                                <User className="mx-auto mb-2 text-slate-400" size={32} />
+                                <div className="text-sm font-bold">{session?.user?.email || "No User Logged In"}</div>
+                                <div className="text-xs text-slate-400 font-mono">{session?.user?.id}</div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3">
+                                <button onClick={() => profileDebug('read')} className="p-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 rounded-xl font-bold flex items-center justify-center gap-2">
+                                    <Search size={16} /> Read My Profile (Fetch)
+                                </button>
+                                <button onClick={() => profileDebug('save_basic')} className="p-3 bg-blue-100 dark:bg-blue-900/40 text-blue-700 hover:bg-blue-200 rounded-xl font-bold flex items-center justify-center gap-2">
+                                    <Save size={16} /> Test Save (Basic Fields)
+                                </button>
+                                <button onClick={() => profileDebug('save_full')} className="p-3 bg-mini-red/10 text-mini-red hover:bg-mini-red/20 rounded-xl font-bold flex items-center justify-center gap-2">
+                                    <ShieldAlert size={16} /> Test Save (Full / Risky)
+                                </button>
+                            </div>
+                             <div className="text-xs text-slate-400 text-center">
+                                'Full Save' attempts to write to <code>board_role</code>. If this fails, you need to run the SQL Fix.
+                            </div>
+                        </div>
+                    )}
+
+                    {/* CONSOLE LOG OUTPUT */}
+                    {(activeTab === 'manual' || activeTab === 'profile') && (
+                        <div className="mt-6 bg-slate-950 text-slate-300 p-4 rounded-xl font-mono text-xs h-40 overflow-y-auto border border-slate-800 shadow-inner">
+                            <div className="flex justify-between items-center mb-2 border-b border-slate-800 pb-2">
+                                <span className="font-bold text-slate-500">CONSOLE OUTPUT</span>
+                                <button onClick={() => setConsoleLogs([])} className="text-slate-500 hover:text-white">Clear</button>
+                            </div>
+                            {consoleLogs.length === 0 ? (
+                                <span className="opacity-30 italic">Waiting for input...</span>
+                            ) : (
+                                consoleLogs.map((l, i) => (
+                                    <div key={i} className={`mb-1 ${
+                                        l.type === 'error' ? 'text-red-400' : 
+                                        l.type === 'success' ? 'text-green-400' : 
+                                        'text-slate-300'
+                                    }`}>
+                                        <span className="opacity-50 mr-2">[{l.time}]</span>
+                                        {l.msg}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    )}
+                </div>
             </div>
         </Modal>
     );
