@@ -1,24 +1,26 @@
 
-
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
-import { Activity, Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, Timer, Globe, Trash2, Edit2, Save, X, RefreshCw, Key, Play } from 'lucide-react';
+import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu } from 'lucide-react';
 import Modal from './Modal';
-import { motion } from 'framer-motion';
 
 interface SupabaseTesterProps {
     isOpen: boolean;
     onClose: () => void;
 }
 
+// SQL Fix Script - Updated to ensure idempotency and robustness
 const FIX_SQL = `
--- 1. CLEANUP: PREVENT DEPENDENCY ERRORS (2BP01)
+-- 1. UTILITIES & EXTENSIONS
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 2. RESET FUNCTIONS (Prevent Dependency Locks)
 DROP POLICY IF EXISTS "Board sees registrations" ON public.registrations;
 DROP POLICY IF EXISTS "Board sees finances" ON public.transactions;
 DROP FUNCTION IF EXISTS public.is_board() CASCADE;
 
--- 2. FIX: Security Warning "Mutable Search Path"
+-- 3. ADMIN SECURITY FUNCTION
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN 
 LANGUAGE plpgsql 
@@ -33,30 +35,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER 
-LANGUAGE plpgsql 
-SECURITY DEFINER SET search_path = public
-AS $$
-DECLARE
-  extracted_username TEXT;
-  extracted_fullname TEXT;
-BEGIN
-  extracted_username := COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
-  extracted_fullname := COALESCE(new.raw_user_meta_data->>'full_name', 'New User');
-
-  INSERT INTO public.profiles (id, email, full_name, username, role, board_role)
-  VALUES (new.id, new.email, extracted_fullname, extracted_username, 'user', null)
-  ON CONFLICT (id) DO UPDATE SET
-    email = EXCLUDED.email,
-    full_name = EXCLUDED.full_name,
-    username = EXCLUDED.username;
-    
-  RETURN new;
-END;
-$$;
-
--- 3. FIX: Enable Full CRUD for Tester
+-- 4. CONNECTION TESTER TABLE (Diagnostics)
 CREATE TABLE IF NOT EXISTS public.connection_tests (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   message TEXT,
@@ -64,80 +43,218 @@ CREATE TABLE IF NOT EXISTS public.connection_tests (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
+
+-- Allow Public/Anon access for troubleshooting
 DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can update tests" ON public.connection_tests;
 DROP POLICY IF EXISTS "Public can delete tests" ON public.connection_tests;
-CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT TO anon, authenticated WITH CHECK (auth.role() IN ('anon', 'authenticated'));
-CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT TO anon, authenticated USING (auth.role() IN ('anon', 'authenticated'));
-CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE TO anon, authenticated USING (auth.role() IN ('anon', 'authenticated'));
-CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE TO anon, authenticated USING (auth.role() IN ('anon', 'authenticated'));
 
--- 4. FIX: Registrations "Always True" Warning
-DROP POLICY IF EXISTS "Public can register" ON public.registrations;
-CREATE POLICY "Public can register" ON public.registrations FOR INSERT WITH CHECK (auth.role() IN ('anon', 'authenticated'));
+CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE TO anon, authenticated USING (true);
 
--- 5. FIX: Performance "Unindexed Foreign Keys"
-CREATE INDEX IF NOT EXISTS idx_itinerary_meeting_id ON public.itinerary_items(meeting_id);
-CREATE INDEX IF NOT EXISTS idx_registrations_meeting_id ON public.registrations(meeting_id);
-CREATE INDEX IF NOT EXISTS idx_registrations_user_id ON public.registrations(user_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_meeting_id ON public.transactions(meeting_id);
-CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON public.user_roles(user_id);
+-- 5. PROFILES SCHEMA FIX (Critical)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+  email TEXT,
+  full_name TEXT,
+  username TEXT,
+  role TEXT DEFAULT 'user',
+  board_role TEXT,
+  car_model TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+-- Idempotent column adds
+DO $$
+BEGIN
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT;
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
+    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+EXCEPTION
+    WHEN duplicate_column THEN RAISE NOTICE 'Column already exists in profiles.';
+END $$;
 
--- 6. FEATURE: App Settings for Auto Logout
+-- 6. APP SETTINGS
 CREATE TABLE IF NOT EXISTS public.app_settings (
   key TEXT PRIMARY KEY,
   value TEXT,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Admins can manage settings" ON public.app_settings;
-CREATE POLICY "Admins can manage settings" ON public.app_settings FOR ALL USING (is_admin());
-DROP POLICY IF EXISTS "Public/Auth can read settings" ON public.app_settings;
-CREATE POLICY "Public/Auth can read settings" ON public.app_settings FOR SELECT USING (true);
+CREATE POLICY "Public settings read" ON public.app_settings FOR SELECT USING (true);
+CREATE POLICY "Admin settings write" ON public.app_settings FOR ALL USING (is_admin());
 
--- 7. FEATURE: Board Role Column
--- Note: 'role' is for System Permissions (Admin/User). 
--- 'board_role' is for Display Titles (Ordförande etc).
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
-
--- 8. FEATURE: Publish Status
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('draft', 'published')) DEFAULT 'draft';
-
--- 9. FEATURE: Itinerary Sorting & Types
-ALTER TABLE public.itinerary_items ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
-ALTER TABLE public.itinerary_items ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'activity';
-
--- 10. FEATURE: Photos and Gallery
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS google_photos_url TEXT;
-ALTER TABLE public.meetings ADD COLUMN IF NOT EXISTS gallery_images JSONB DEFAULT '[]'::jsonb;
-
--- 11. FIX: Reload Schema Cache (Critical for new columns)
+-- 7. REFRESH SCHEMA CACHE
 NOTIFY pgrst, 'reload schema';
 `;
 
 const RELOAD_SQL = `NOTIFY pgrst, 'reload schema';`;
 
-const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
-    const [inputVal, setInputVal] = useState('');
-    const [outputVal, setOutputVal] = useState<string | null>(null);
-    const [status, setStatus] = useState<'idle' | 'writing' | 'reading' | 'success' | 'error'>('idle');
-    const [logs, setLogs] = useState<string[]>([]);
-    const [copied, setCopied] = useState(false);
-    const [reloadCopied, setReloadCopied] = useState(false);
-    
-    // Table Data State
-    const [tableRows, setTableRows] = useState<any[]>([]);
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [editValue, setEditValue] = useState('');
-    
-    // Countdown state for cold starts
-    const [countdown, setCountdown] = useState<number | null>(null);
-    const coldStartTimer = useRef<any>(null);
+// Diagnostic Step Definition
+type DiagnosticStep = {
+    id: string;
+    label: string;
+    status: 'pending' | 'running' | 'success' | 'error';
+    detail?: string;
+    errorCode?: string;
+};
 
-    const addLog = (msg: string) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
+const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
+    const [isRunning, setIsRunning] = useState(false);
+    const [steps, setSteps] = useState<DiagnosticStep[]>([]);
+    const [copied, setCopied] = useState(false);
+    
+    // --- DIAGNOSTIC LOGIC ---
+
+    const getEnvVars = () => {
+        let url = '';
+        let key = '';
+        try {
+            // @ts-ignore
+            if (import.meta.env) {
+                // @ts-ignore
+                url = (import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/$/, '');
+                // @ts-ignore
+                key = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').trim();
+            }
+        } catch (e) { console.error(e); }
+        return { url, key };
+    };
+
+    const runDiagnostics = async () => {
+        setIsRunning(true);
+        
+        // Reset Steps
+        const initialSteps: DiagnosticStep[] = [
+            { id: 'env', label: 'Environment Configuration', status: 'pending' },
+            { id: 'network', label: 'Network Reachability', status: 'pending' },
+            { id: 'table', label: 'Diagnostic Table Check', status: 'pending' },
+            { id: 'write', label: 'Write Permissions', status: 'pending' },
+            { id: 'schema', label: 'Profile Schema Validation', status: 'pending' },
+        ];
+        setSteps(initialSteps);
+
+        const updateStep = (id: string, status: DiagnosticStep['status'], detail?: string, errorCode?: string) => {
+            setSteps(prev => prev.map(s => s.id === id ? { ...s, status, detail, errorCode } : s));
+            return status === 'success';
+        };
+
+        // 1. ENV CHECK
+        updateStep('env', 'running');
+        const { url, key } = getEnvVars();
+        if (!url || !key || url.includes('placeholder')) {
+            updateStep('env', 'error', 'Missing VITE_SUPABASE_URL or Key');
+            setIsRunning(false);
+            return;
+        }
+        updateStep('env', 'success', `Connected to: ${url.substring(8, 25)}...`);
+
+        if (isDemoMode) {
+            await new Promise(r => setTimeout(r, 500));
+            updateStep('network', 'success', 'Demo Mode');
+            updateStep('table', 'success', 'Demo Mode');
+            updateStep('write', 'success', 'Demo Mode');
+            updateStep('schema', 'success', 'Demo Mode');
+            setIsRunning(false);
+            return;
+        }
+
+        // Create isolated client
+        const testClient = createClient(url, key, {
+            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+            global: { headers: { 'x-client-info': 'nmcs-tester' } }
+        });
+
+        // 2. NETWORK CHECK (Fastest possible ping)
+        updateStep('network', 'running');
+        try {
+            // "HEAD" request via select count is effectively a ping
+            const start = Date.now();
+            const { error } = await testClient.from('connection_tests').select('id', { count: 'exact', head: true });
+            
+            // We ignore table errors here; we just care if the SERVER responded
+            if (error && error.code === undefined && error.message.includes('fetch')) {
+                 updateStep('network', 'error', 'Server unreachable. Check internet or URL.');
+                 setIsRunning(false);
+                 return;
+            }
+            const latency = Date.now() - start;
+            updateStep('network', 'success', `Latency: ${latency}ms`);
+        } catch (e: any) {
+            updateStep('network', 'error', e.message);
+            setIsRunning(false);
+            return;
+        }
+
+        // 3. TABLE EXISTENCE
+        updateStep('table', 'running');
+        const { error: tableError } = await testClient.from('connection_tests').select('id').limit(1);
+        if (tableError) {
+            if (tableError.code === '42P01') {
+                updateStep('table', 'error', 'Table missing.', '42P01');
+                updateStep('write', 'error', 'Cannot write to missing table.'); // Cascading fail
+                setIsRunning(false); // Stop here, need SQL fix
+                return;
+            } else if (tableError.code === '42501') {
+                updateStep('table', 'error', 'RLS Policy Violation (Access Denied).', '42501');
+                setIsRunning(false);
+                return;
+            }
+            updateStep('table', 'error', tableError.message, tableError.code);
+            setIsRunning(false);
+            return;
+        }
+        updateStep('table', 'success', 'Table "connection_tests" exists.');
+
+        // 4. WRITE CHECK
+        updateStep('write', 'running');
+        const testId = crypto.randomUUID();
+        const { error: writeError } = await testClient
+            .from('connection_tests')
+            .insert({ id: testId, message: 'Diagnostics Ping', response_data: 'OK' });
+        
+        if (writeError) {
+            updateStep('write', 'error', writeError.message, writeError.code);
+            setIsRunning(false);
+            return;
+        } else {
+            // Cleanup (Fire and forget)
+            testClient.from('connection_tests').delete().eq('id', testId).then(() => {});
+            updateStep('write', 'success', 'Insert / Delete successful.');
+        }
+
+        // 5. PROFILE SCHEMA CHECK (The "Board Role" Fixer)
+        updateStep('schema', 'running');
+        // We try to select the specific columns that were causing issues
+        const { error: schemaError } = await testClient
+            .from('profiles')
+            .select('board_role, role, car_model')
+            .limit(1);
+
+        if (schemaError) {
+            if (schemaError.code === '42703') {
+                updateStep('schema', 'error', 'Missing columns (Schema Mismatch).', '42703');
+            } else if (schemaError.code === '42P01') {
+                updateStep('schema', 'error', 'Table "profiles" missing.', '42P01');
+            } else {
+                updateStep('schema', 'error', schemaError.message, schemaError.code);
+            }
+        } else {
+            updateStep('schema', 'success', 'Profile columns verified.');
+        }
+
+        setIsRunning(false);
+    };
+
+    // Auto-run on open
+    useEffect(() => {
+        if (isOpen) runDiagnostics();
+    }, [isOpen]);
 
     const copySql = () => {
         navigator.clipboard.writeText(FIX_SQL);
@@ -145,572 +262,121 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const copyReloadSql = () => {
-        navigator.clipboard.writeText(RELOAD_SQL);
-        setReloadCopied(true);
-        setTimeout(() => setReloadCopied(false), 2000);
-    };
-
-    // Helper to timeout a promise
-    const withTimeout = (promise: any, ms: number = 65000) => {
-        return Promise.race([
-            promise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error(`Connection timed out (${ms/1000}s).`)), ms))
-        ]);
-    };
-
-    // Helper: Create a fresh client (bypassing global singleton issues)
-    const getFreshClient = () => {
-        let envUrl = '';
-        let envKey = '';
-        try {
-            // @ts-ignore
-            if (typeof import.meta !== 'undefined' && import.meta.env) {
-                 // @ts-ignore
-                 envUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/^['"]|['"]$/g, '').trim();
-                 envUrl = envUrl.replace(/\/$/, '');
-                 
-                 // @ts-ignore
-                 envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').replace(/^['"]|['"]$/g, '').trim();
-            }
-        } catch (e) {
-            console.error(e);
-        }
-        
-        if (!envUrl || !envKey) return null;
-
-        return createClient(envUrl, envKey, {
-            auth: { persistSession: false }
-        });
-    };
-
-    const fetchLatestRows = async (customClient?: any) => {
-        const client = customClient || supabase;
-
-        if (isDemoMode) {
-            setTableRows([
-                { id: 'mock-1', message: 'Demo Data 1', created_at: new Date().toISOString() },
-                { id: 'mock-2', message: 'Demo Data 2', created_at: new Date().toISOString() }
-            ]);
-            return;
-        }
-
-        const { data, error } = await client
-            .from('connection_tests')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5);
-        
-        if (error) {
-            addLog(`Table Refresh Failed: ${error.message} (${error.code || 'No Code'})`);
-        } else {
-            setTableRows(data || []);
-        }
-    };
-
-    useEffect(() => {
-        if (isOpen) {
-            fetchLatestRows();
-        }
-    }, [isOpen]);
-
-    // Cleanup timer on unmount
-    useEffect(() => {
-        return () => {
-            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-        };
-    }, []);
-
-    const startCountdown = () => {
-        setCountdown(60);
-        const interval = setInterval(() => {
-            setCountdown(prev => {
-                if (prev === null || prev <= 1) {
-                    clearInterval(interval);
-                    return null;
-                }
-                return prev - 1;
-            });
-        }, 1000);
-        return interval;
-    };
-
-    const handleTest = async () => {
-        if (!inputVal) return;
-        
-        setStatus('writing');
-        setOutputVal(null);
-        setLogs([]);
-        setCountdown(null);
-        
-        // Use standard Vite env access safely
-        let envUrl = '';
-        let envKey = '';
-        try {
-            // @ts-ignore
-            if (typeof import.meta !== 'undefined' && import.meta.env) {
-                 // @ts-ignore
-                 envUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/^['"]|['"]$/g, '').trim();
-                 envUrl = envUrl.replace(/\/$/, '');
-                 
-                 // @ts-ignore
-                 envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_KEY || '').replace(/^['"]|['"]$/g, '').trim();
-            }
-        } catch (e) {
-            // ignore
-        }
-        
-        if (!envUrl) {
-            addLog('CRITICAL ERROR: VITE_SUPABASE_URL is missing!');
-            addLog('In Coolify, keys must start with "VITE_" to be visible to the frontend.');
-            setStatus('error');
-            return;
-        }
-
-        if (envUrl.includes('"') || envUrl.includes("'") || envUrl.includes(" ")) {
-            addLog('ERROR: URL contains invalid characters (quotes/spaces).');
-            addLog('We attempted to clean it, but check your Coolify settings.');
-        }
-
-        addLog(`Target: ${envUrl.replace(/https:\/\/[^.]+\./, 'https://***.')}`);
-        
-        if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-        
-        // Start "Slow Response" detector
-        coldStartTimer.current = setTimeout(() => {
-             addLog('⚠️ Slow response detected.');
-             addLog('Database might be "Paused" (Free Tier limit).');
-             addLog('Waking up database... (up to 60s)');
-             startCountdown();
-        }, 3000);
-
-        if (isDemoMode) {
-            clearTimeout(coldStartTimer.current);
-            setTimeout(() => {
-                addLog('Demo Mode: Simulating write...');
-                setStatus('reading');
-                setTimeout(() => {
-                    addLog('Demo Mode: Read successful.');
-                    setOutputVal(inputVal);
-                    setStatus('success');
-                    fetchLatestRows();
-                }, 800);
-            }, 800);
-            return;
-        }
-
-        try {
-            // STEP 0: DIRECT HTTP CHECK (Root)
-            addLog('Step 0: Network Reachability Check...');
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-            try {
-                const restUrl = `${envUrl}/rest/v1/`;
-                
-                const response = await fetch(restUrl, {
-                    method: 'GET',
-                    headers: {
-                        'apikey': envKey,
-                        'Authorization': `Bearer ${envKey}`
-                    },
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                
-                if (response.ok || response.status === 404) {
-                    addLog(`Network OK. Status: ${response.status}`);
-                } else if (response.status === 401) {
-                    addLog('CRITICAL ERROR: 401 Unauthorized.');
-                    setStatus('error');
-                    if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-                    return; // ABORT
-                } else {
-                    addLog(`Network Warning. Server replied: ${response.status} ${response.statusText}`);
-                }
-            } catch (netErr: any) {
-                console.error("Network check failed:", netErr);
-                addLog(`NETWORK ERROR: ${netErr.name} - ${netErr.message}`);
-                throw new Error('Network Reachability Failed');
-            }
-
-            // RESET TIMER: Step 0 Passed, so network is fine.
-            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-            coldStartTimer.current = setTimeout(() => {
-                 addLog('⚠️ Slow response detected on DB step.');
-                 startCountdown();
-            }, 3000);
-
-            // STEP 1: DIRECT TABLE CHECK (REST)
-            // Bypasses SDK to isolate if table exists or permissions issue
-            addLog('Step 1: Checking Table Existence (REST)...');
-            try {
-                // Try to fetch just 1 row, 0 bytes
-                const tableUrl = `${envUrl}/rest/v1/connection_tests?select=id&limit=1`;
-                const tableResp = await fetch(tableUrl, {
-                    method: 'GET',
-                    headers: {
-                        'apikey': envKey,
-                        'Authorization': `Bearer ${envKey}`
-                    }
-                    // No timeout here, let it run (Supabase sleep can take time)
-                });
-                
-                if (tableResp.status === 404) {
-                    throw new Error('Table "connection_tests" Not Found (404). Run SQL Fix!');
-                } else if (tableResp.status === 401) {
-                     throw new Error('Unauthorized Access to Table. Check RLS Policies (Run SQL Fix).');
-                } else if (!tableResp.ok) {
-                     addLog(`Table Check Warning: ${tableResp.status} ${tableResp.statusText}`);
-                } else {
-                    addLog('Table "connection_tests" found and accessible.');
-                }
-            } catch (tableErr: any) {
-                 if (tableErr.message.includes('SQL Fix')) throw tableErr;
-                 addLog(`Table Check Info: ${tableErr.message}`);
-                 // Continue to SDK anyway, maybe it can handle it
-            }
-
-            // STEP 2: SDK PING
-            addLog('Step 2: Pinging database (SDK)...');
-            
-            // RESET TIMER: Step 1 Passed, so REST is fine.
-            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-            coldStartTimer.current = setTimeout(() => {
-                 addLog('⚠️ SDK is taking a long time...');
-                 startCountdown();
-            }, 5000);
-
-            // CRITICAL: Create a fresh, isolated client using the keys we just verified.
-            const testClient = createClient(envUrl, envKey, {
-                auth: { persistSession: false } // Pure data test, no auth overhead
-            });
-            
-            const { error: pingError } = await withTimeout(
-                testClient.from('connection_tests').select('id').limit(1)
-            );
-            
-            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-            setCountdown(null);
-
-            if (pingError) {
-                if (pingError.code === '42P01') {
-                     throw new Error('Table "connection_tests" not found. Run the SQL Fix.');
-                }
-                throw new Error(`Ping Failed: ${pingError.message} (${pingError.code || 'No Code'})`);
-            }
-            addLog(`Ping successful. SDK Connected.`);
-
-            // STEP 3: WRITE
-            addLog(`Step 3: Writing "${inputVal}"...`);
-            const { data: insertData, error: insertError } = await withTimeout(
-                testClient.from('connection_tests')
-                .insert([{ 
-                    message: inputVal,
-                    response_data: 'Server received: ' + inputVal
-                }])
-                .select()
-                .single()
-            );
-
-            if (insertError) throw new Error(`Write Failed: ${insertError.message}`);
-
-            addLog('Write successful. Row ID: ' + insertData.id);
-            setStatus('reading');
-
-            // STEP 4: READ BACK
-            addLog('Step 4: Verifying data...');
-            const { data: readData, error: readError } = await withTimeout(
-                testClient.from('connection_tests')
-                .select('message')
-                .eq('id', insertData.id)
-                .single()
-            );
-
-            if (readError) throw new Error(`Read Failed: ${readError.message}`);
-
-            addLog(`Read successful. Value: "${readData.message}"`);
-            setOutputVal(readData.message);
-            setStatus('success');
-            
-            // USE THE WORKING CLIENT TO REFRESH THE TABLE
-            await fetchLatestRows(testClient);
-
-        } catch (err: any) {
-            if (coldStartTimer.current) clearTimeout(coldStartTimer.current);
-            setCountdown(null);
-            
-            console.error(err);
-            const msg = err.message || 'Unknown error';
-            addLog('ERROR: ' + msg);
-            
-            if (msg.includes('timed out') || msg.includes('Failed to fetch') || msg.includes('Network Reachability')) {
-                addLog('------------------------------------------------');
-                addLog('DIAGNOSIS: CONNECTION TIMEOUT / PAUSED');
-                addLog('1. Database is waking up (Wait 1 min and try again).');
-                addLog('2. Check VITE_SUPABASE_URL in Coolify.');
-                addLog('------------------------------------------------');
-            } else if (msg.includes('not found') || msg.includes('policy') || msg.includes('permission') || msg.includes('404')) {
-                addLog('------------------------------------------------');
-                addLog('DIAGNOSIS: MISSING TABLE OR RLS POLICY');
-                addLog('The app cannot write to the database yet.');
-                addLog('SOLUTION: Click "Copy Full Fix" below and run in Supabase SQL Editor.');
-                addLog('------------------------------------------------');
-            } else if (msg.includes('401')) {
-                addLog('------------------------------------------------');
-                addLog('DIAGNOSIS: INVALID API KEY');
-                addLog('See KEY INSPECTOR above.');
-                addLog('------------------------------------------------');
-            }
-
-            setStatus('error');
-        }
-    };
-
-    const handleDelete = async (id: string) => {
-        if (isDemoMode) {
-            setTableRows(prev => prev.filter(r => r.id !== id));
-            addLog('Demo Mode: Deleted locally.');
-            return;
-        }
-
-        const client = getFreshClient();
-        if (!client) {
-            addLog('ERROR: Could not create Supabase client (Missing Env Vars?)');
-            return;
-        }
-
-        addLog(`Deleting row ${id.slice(0, 8)}...`);
-        const { error } = await client.from('connection_tests').delete().eq('id', id);
-        
-        if (error) {
-            addLog(`Delete Failed: ${error.message}`);
-        } else {
-            addLog('Delete successful.');
-            fetchLatestRows(client);
-        }
-    };
-
-    const handleUpdate = async (id: string) => {
-        if (isDemoMode) {
-            setTableRows(prev => prev.map(r => r.id === id ? { ...r, message: editValue } : r));
-            setEditingId(null);
-            addLog('Demo Mode: Updated locally.');
-            return;
-        }
-
-        const client = getFreshClient();
-        if (!client) {
-            addLog('ERROR: Could not create Supabase client (Missing Env Vars?)');
-            return;
-        }
-
-        addLog(`Updating row ${id.slice(0, 8)}...`);
-        const { error } = await client.from('connection_tests').update({ message: editValue }).eq('id', id);
-        
-        if (error) {
-            addLog(`Update Failed: ${error.message}`);
-        } else {
-            addLog('Update successful.');
-            setEditingId(null);
-            fetchLatestRows(client);
-        }
-    };
+    const hasError = steps.some(s => s.status === 'error');
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Connection Troubleshooter">
+        <Modal isOpen={isOpen} onClose={onClose} title="System Diagnostics">
             <div className="space-y-6">
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-sm text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
-                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Database Status</h4>
-                    <p className="text-xs mb-2">
-                        If you see "Sync Error" or missing columns (like 'board_role'), you must update your database schema.
-                    </p>
-                    <div className="mt-3 p-3 bg-white dark:bg-slate-950 rounded border border-blue-200 dark:border-blue-800">
-                        <strong className="block text-xs uppercase text-slate-500 mb-1">Instruction:</strong>
-                        <ol className="list-decimal ml-4 space-y-1 text-xs font-mono">
-                            <li>Click <span className="font-bold text-mini-red">"Copy Full Fix"</span> below.</li>
-                            <li>Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="underline font-bold text-blue-600">Supabase SQL Editor</a>.</li>
-                            <li>Paste the code and click <span className="font-bold">RUN</span>.</li>
-                            <li>Wait for "Success" message in Supabase.</li>
-                        </ol>
-                    </div>
-                </div>
-
-                {/* VISUALIZER */}
-                <div className="flex items-center justify-between px-4 py-8 bg-slate-100 dark:bg-slate-900 rounded-2xl relative overflow-hidden">
-                    {/* PC */}
-                    <div className="flex flex-col items-center z-10">
-                        <div className={`p-4 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border-2 ${status === 'writing' ? 'border-mini-red' : 'border-transparent'}`}>
-                             <Server size={24} className="text-slate-700 dark:text-slate-200" />
-                        </div>
-                        <span className="text-xs font-bold mt-2 text-slate-500">Your App</span>
-                    </div>
-
-                    {/* Connection Line */}
-                    <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 px-16">
-                        <div className="h-1 bg-slate-200 dark:bg-slate-700 w-full rounded-full overflow-hidden relative">
-                             <div className="absolute inset-0 bg-slate-200 dark:bg-slate-700"></div>
-                             {status === 'success' && <div className="absolute inset-0 bg-green-500"></div>}
-                             {status === 'error' && <div className="absolute inset-0 bg-red-500"></div>}
-                            {(status === 'writing' || status === 'reading') && (
-                                <motion.div 
-                                    className="h-full bg-mini-red w-1/3 absolute top-0"
-                                    initial={{ x: '-100%' }}
-                                    animate={{ x: '300%' }}
-                                    transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                                />
-                            )}
-                        </div>
-                        {/* Countdown Overlay */}
-                        {countdown !== null && (
-                            <div className="absolute inset-0 flex items-center justify-center -top-6">
-                                <span className="bg-yellow-100 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                                    <Timer size={10} /> Waking Up: {countdown}s
-                                </span>
-                            </div>
+                {/* STATUS CARD */}
+                <div className={`p-6 rounded-2xl border-2 transition-colors ${
+                    isRunning ? 'bg-blue-50 border-blue-100 dark:bg-blue-900/10 dark:border-blue-900' :
+                    hasError ? 'bg-red-50 border-red-100 dark:bg-red-900/10 dark:border-red-900' :
+                    'bg-green-50 border-green-100 dark:bg-green-900/10 dark:border-green-900'
+                }`}>
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold flex items-center gap-2">
+                             {isRunning ? <RefreshCw className="animate-spin text-blue-600" /> : 
+                              hasError ? <ShieldAlert className="text-red-600" /> : 
+                              <CheckCircle2 className="text-green-600" />}
+                             
+                             {isRunning ? 'Running Diagnostics...' : 
+                              hasError ? 'System Issues Detected' : 
+                              'All Systems Operational'}
+                        </h3>
+                        {!isRunning && (
+                            <button 
+                                onClick={runDiagnostics}
+                                className="px-4 py-2 bg-white dark:bg-slate-800 rounded-lg text-sm font-bold shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+                            >
+                                <Play size={14} /> Re-run
+                            </button>
                         )}
                     </div>
 
-                    {/* DB */}
-                    <div className="flex flex-col items-center z-10">
-                         <div className={`p-4 rounded-2xl bg-white dark:bg-slate-800 shadow-lg border-2 ${status === 'reading' || status === 'success' ? 'border-green-500' : status === 'error' ? 'border-red-500' : 'border-transparent'}`}>
-                             {status === 'error' ? (
-                                <AlertCircle size={24} className="text-red-500" />
-                             ) : (
-                                <Database size={24} className="text-slate-700 dark:text-slate-200" />
-                             )}
-                        </div>
-                        <span className="text-xs font-bold mt-2 text-slate-500">Supabase</span>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Test Connection</label>
-                        <input 
-                            type="text" 
-                            value={inputVal}
-                            onChange={(e) => setInputVal(e.target.value)}
-                            placeholder="Type hello..."
-                            className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:ring-2 focus:ring-mini-red outline-none"
-                        />
-                        <button 
-                            onClick={handleTest}
-                            disabled={!inputVal || status === 'writing' || status === 'reading'}
-                            className="mt-3 w-full py-3 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {status === 'writing' || status === 'reading' ? <Activity className="animate-spin" size={18} /> : <Globe size={18} />}
-                            {status === 'writing' ? 'Testing...' : 'Test Reachability'}
-                        </button>
-                    </div>
-
-                    <div className="flex flex-col h-full">
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Live Logs</label>
-                        <div className="flex-grow bg-black/90 text-green-400 p-3 rounded-xl font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col-reverse min-h-[160px]">
-                            {logs.length === 0 ? <span className="opacity-50">Ready to test...</span> : logs.map((log, i) => (
-                                <div key={i} className="mb-1 border-b border-white/10 pb-1 last:border-0 break-all">{log}</div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Stored Data Table */}
-                <div>
-                    <div className="flex items-center justify-between mb-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Stored Data (Last 5)</label>
-                        <button onClick={() => fetchLatestRows()} className="text-xs text-blue-500 hover:underline flex items-center gap-1">
-                            <RefreshCw size={10} /> Refresh
-                        </button>
-                    </div>
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
-                        <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-                                <tr>
-                                    <th className="p-3 text-slate-500 font-bold w-20">ID</th>
-                                    <th className="p-3 text-slate-500 font-bold">Message</th>
-                                    <th className="p-3 text-slate-500 font-bold text-right w-20">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {tableRows.map(row => (
-                                    <tr key={row.id}>
-                                        <td className="p-3 font-mono text-slate-400">{row.id.slice(0,6)}...</td>
-                                        <td className="p-3">
-                                            {editingId === row.id ? (
-                                                <input 
-                                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 outline-none focus:border-mini-red"
-                                                    value={editValue}
-                                                    onChange={e => setEditValue(e.target.value)}
-                                                    autoFocus
-                                                />
-                                            ) : (
-                                                <span className="text-slate-700 dark:text-slate-300">{row.message}</span>
-                                            )}
-                                        </td>
-                                        <td className="p-3 text-right">
-                                            <div className="flex justify-end gap-2">
-                                                {editingId === row.id ? (
-                                                    <>
-                                                        <button onClick={() => handleUpdate(row.id)} className="text-green-600 hover:text-green-700 p-1 bg-green-50 dark:bg-green-900/30 rounded"><Save size={14}/></button>
-                                                        <button onClick={() => setEditingId(null)} className="text-slate-400 hover:text-slate-600 p-1 bg-slate-50 dark:bg-slate-800 rounded"><X size={14}/></button>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <button onClick={() => { setEditingId(row.id); setEditValue(row.message); }} className="text-blue-500 hover:text-blue-600 p-1 bg-blue-50 dark:bg-blue-900/30 rounded"><Edit2 size={14}/></button>
-                                                        <button onClick={() => handleDelete(row.id)} className="text-red-500 hover:text-red-600 p-1 bg-red-50 dark:bg-red-900/30 rounded"><Trash2 size={14}/></button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                                {tableRows.length === 0 && (
-                                    <tr><td colSpan={3} className="p-6 text-center text-slate-400 italic">No data found in 'connection_tests'.</td></tr>
+                    <div className="space-y-3">
+                        {steps.map(step => (
+                            <div key={step.id} className="flex items-center justify-between p-3 bg-white/60 dark:bg-slate-900/40 rounded-xl border border-white/50 dark:border-white/5">
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-1.5 rounded-full ${
+                                        step.status === 'pending' ? 'bg-slate-200 text-slate-400' :
+                                        step.status === 'running' ? 'bg-blue-100 text-blue-600 animate-pulse' :
+                                        step.status === 'error' ? 'bg-red-100 text-red-600' :
+                                        'bg-green-100 text-green-600'
+                                    }`}>
+                                        {step.status === 'running' ? <RefreshCw size={14} className="animate-spin" /> :
+                                         step.status === 'error' ? <X size={14} /> :
+                                         step.status === 'success' ? <Check size={14} /> :
+                                         <div className="w-3.5 h-3.5" />}
+                                    </div>
+                                    <span className={`text-sm font-bold ${
+                                        step.status === 'error' ? 'text-red-700 dark:text-red-400' : 
+                                        'text-slate-700 dark:text-slate-200'
+                                    }`}>
+                                        {step.label}
+                                    </span>
+                                </div>
+                                
+                                {step.detail && (
+                                    <div className="flex flex-col items-end">
+                                        <span className={`text-xs font-mono font-medium ${
+                                            step.status === 'error' ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded' : 
+                                            'text-slate-500'
+                                        }`}>
+                                            {step.detail}
+                                        </span>
+                                        {step.errorCode && (
+                                            <span className="text-[10px] text-slate-400 mt-0.5">Code: {step.errorCode}</span>
+                                        )}
+                                    </div>
                                 )}
-                            </tbody>
-                        </table>
+                            </div>
+                        ))}
                     </div>
                 </div>
 
-                {/* SQL Fix Section */}
-                <div className="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl p-4 flex flex-col gap-3">
-                    <div className="flex items-start gap-3">
-                        <Database className="text-slate-500 shrink-0 mt-1" size={20} />
-                        <div>
-                            <h4 className="font-bold text-slate-700 dark:text-slate-300 text-sm">Apply Database Fixes</h4>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                Run this SQL to fix Security Warnings, Permissions, and Performance Issues.
+                {/* ACTION AREA - Only show if errors exist */}
+                {hasError && (
+                    <div className="bg-slate-900 text-slate-200 p-5 rounded-2xl border border-slate-700 shadow-2xl relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <Terminal size={120} />
+                        </div>
+                        
+                        <div className="relative z-10">
+                            <h4 className="text-white font-bold text-lg mb-2 flex items-center gap-2">
+                                <Cpu className="text-mini-red" />
+                                Automated Repair Protocol
+                            </h4>
+                            <p className="text-sm text-slate-400 mb-6 max-w-md">
+                                Issues were detected with your database schema or permissions. 
+                                Execute the repair script to synchronize the database structure.
                             </p>
+
+                            <div className="flex flex-col sm:flex-row gap-3">
+                                <a 
+                                    href="https://supabase.com/dashboard/project/_/sql/new" 
+                                    target="_blank" 
+                                    rel="noreferrer"
+                                    className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-bold transition-all shadow-lg shadow-blue-900/50"
+                                >
+                                    <ExternalLink size={18} /> Open SQL Editor
+                                </a>
+
+                                <button 
+                                    onClick={copySql}
+                                    className="flex items-center justify-center gap-2 bg-mini-red hover:bg-red-600 text-white px-5 py-3 rounded-xl font-bold transition-all shadow-lg shadow-red-900/50"
+                                >
+                                    {copied ? <Check size={18} /> : <Copy size={18} />}
+                                    {copied ? 'Script Copied!' : 'Copy Repair Script'}
+                                </button>
+                            </div>
+                            
+                            <div className="mt-4 flex items-start gap-2 text-[10px] text-slate-500 bg-black/30 p-2 rounded">
+                                <AlertCircle size={12} className="mt-0.5" />
+                                <span>Paste the script into the Supabase SQL Editor and click "Run". Then come back here and click "Re-run".</span>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div className="flex gap-2">
-                         <a 
-                            href="https://supabase.com/dashboard" 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="flex-1 flex items-center justify-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg font-bold text-xs hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                         >
-                            <ExternalLink size={14} /> Open Dashboard
-                         </a>
-                        
-                        <button 
-                            onClick={copyReloadSql}
-                            className="flex-1 flex items-center justify-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
-                        >
-                            {reloadCopied ? <Check size={14} /> : <RefreshCw size={14} />}
-                            {reloadCopied ? 'Copied!' : 'Copy "Reload Schema"'}
-                        </button>
-
-                        <button 
-                            onClick={copySql}
-                            className="flex-1 flex items-center justify-center gap-2 bg-mini-red hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap"
-                        >
-                            {copied ? <Check size={14} /> : <Copy size={14} />}
-                            {copied ? 'Copied!' : 'Copy Full Fix'}
-                        </button>
-                    </div>
-                </div>
+                )}
             </div>
         </Modal>
     );

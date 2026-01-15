@@ -1,7 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -123,6 +123,13 @@ const Profile: React.FC = () => {
         setSaving(true);
         setStatusMsg(null);
         
+        // 1. TIMEOUT GUARD
+        // Create a timeout promise that rejects after 10 seconds.
+        // This ensures the UI never gets stuck in "Saving..." indefinitely.
+        const timeoutGuard = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Connection timeout. Server took too long to respond.")), 10000)
+        );
+
         try {
             if (isDemoMode) {
                 await new Promise(resolve => setTimeout(resolve, 800));
@@ -131,47 +138,53 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // Safe Save Strategy:
-            // 1. Save Core Data (Columns that definitely exist)
-            // 2. Try Save Extra Data (Columns that might be missing like board_role)
-            
-            const coreData = {
+            // 2. ISOLATED CLIENT
+            // We use a fresh client instance to avoid any state issues with the global singleton.
+            const tempClient = createClient(finalUrl, finalKey, {
+                global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+                auth: { persistSession: false }
+            });
+
+            // 3. PREPARE DATA
+            const updates: any = {
                 id: session.user.id,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
                 car_model: model,
                 updated_at: new Date().toISOString(),
+                // Optimistically include board_role. We handle failure below.
+                ...(formData.board_role ? { board_role: formData.board_role } : {})
             };
 
-            // Attempt Core Save
-            const { error: coreError } = await supabase.from('profiles').upsert(coreData);
-
-            if (coreError) {
-                throw coreError;
-            }
-
-            let warningMsg = '';
-
-            // Attempt Extra Data Save (board_role)
-            if (formData.board_role) {
-                try {
-                    const { error: extraError } = await supabase
-                        .from('profiles')
-                        .update({ board_role: formData.board_role })
-                        .eq('id', session.user.id);
-                    
-                    if (extraError) {
-                        console.warn("Could not save board_role (likely missing column):", extraError.message);
-                        warningMsg = "Saved, but 'Board Role' could not be synced. Database needs update.";
+            // 4. ATTEMPT SAVE (RACED AGAINST TIMEOUT)
+            const saveOperation = async () => {
+                const { error } = await tempClient.from('profiles').upsert(updates);
+                
+                if (error) {
+                    // DETECT SCHEMA MISMATCH (Missing 'board_role' column)
+                    // Postgres error 42703 = undefined_column
+                    if (error.code === '42703' || error.message.includes('board_role')) {
+                        console.warn("[Profile] Schema mismatch detected. Retrying without board_role.");
+                        
+                        // Retry without the problematic column
+                        const { board_role, ...safeUpdates } = updates;
+                        const { error: retryError } = await tempClient.from('profiles').upsert(safeUpdates);
+                        
+                        if (retryError) throw retryError;
+                        
+                        // Return a special flag indicating partial success
+                        return { partial: true };
                     }
-                } catch (e) {
-                    // Ignore crash on extra fields
-                    warningMsg = "Saved core profile, but extended fields failed.";
+                    throw error;
                 }
-            }
+                return { partial: false };
+            };
 
-            // 3. Update Password (Optional)
+            // Run the race
+            const result = await Promise.race([saveOperation(), timeoutGuard]) as { partial: boolean };
+
+            // 5. UPDATE PASSWORD (Optional)
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 const { error: pwError } = await updatePassword(newPassword);
@@ -179,8 +192,13 @@ const Profile: React.FC = () => {
                 setNewPassword('');
             }
 
-            if (warningMsg) {
-                 setStatusMsg({ type: 'warning', text: warningMsg, detail: "Run the Database Fixer to enable all fields." });
+            // 6. FINAL STATUS
+            if (result.partial) {
+                 setStatusMsg({ 
+                     type: 'warning', 
+                     text: "Saved, but 'Board Role' could not be synced.", 
+                     detail: "Your profile is saved, but the database schema is outdated. Please run the Fixer." 
+                 });
             } else {
                  setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
             }
@@ -188,7 +206,11 @@ const Profile: React.FC = () => {
         } catch (error: any) {
             console.error("Save Error:", error);
             let errorMessage = error.message || 'An unexpected error occurred.';
-            let detail = error.message;
+            let detail = undefined;
+
+            if (errorMessage.includes('timeout')) {
+                detail = "Check your internet connection.";
+            }
 
             setStatusMsg({ type: 'error', text: errorMessage, detail });
         } finally {
