@@ -45,8 +45,8 @@ BEGIN
   extracted_username := COALESCE(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
   extracted_fullname := COALESCE(new.raw_user_meta_data->>'full_name', 'New User');
 
-  INSERT INTO public.profiles (id, email, full_name, username, role)
-  VALUES (new.id, new.email, extracted_fullname, extracted_username, 'user')
+  INSERT INTO public.profiles (id, email, full_name, username, role, board_role)
+  VALUES (new.id, new.email, extracted_fullname, extracted_username, 'user', null)
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     full_name = EXCLUDED.full_name,
@@ -454,7 +454,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 addLog('------------------------------------------------');
                 addLog('DIAGNOSIS: MISSING TABLE OR RLS POLICY');
                 addLog('The app cannot write to the database yet.');
-                addLog('SOLUTION: Click "Copy SQL Fixes" below and run in Supabase SQL Editor.');
+                addLog('SOLUTION: Click "Copy Full Fix" below and run in Supabase SQL Editor.');
                 addLog('------------------------------------------------');
             } else if (msg.includes('401')) {
                 addLog('------------------------------------------------');
@@ -521,17 +521,19 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         <Modal isOpen={isOpen} onClose={onClose} title="Connection Troubleshooter">
             <div className="space-y-6">
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl text-sm text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
-                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Security & Performance Updates</h4>
+                    <h4 className="font-bold flex items-center gap-2 mb-2"><ShieldAlert size={16}/> Database Status</h4>
                     <p className="text-xs mb-2">
-                        Updates available for "Dependency Errors (2BP01)", "Security Advisor", and "Permissions".
+                        If you see "Sync Error" or missing columns (like 'board_role'), you must update your database schema.
                     </p>
-                    <ul className="list-disc ml-4 space-y-1 text-xs">
-                        <li><strong>Fixed Dependency Error (2BP01):</strong> SQL now explicitly drops old "Board" policies before dropping functions.</li>
-                        <li><strong>Fixed "Always True" Policies:</strong> Updated policies to use explicit role checks.</li>
-                        <li><strong>Mutable Search Path:</strong> Fixed by adding <code>SET search_path = public</code> to functions.</li>
-                        <li><strong>NEW: Publish Status:</strong> Added 'status' column to meetings table.</li>
-                        <li><strong>NEW: Board Role:</strong> Added 'board_role' column to profiles table.</li>
-                    </ul>
+                    <div className="mt-3 p-3 bg-white dark:bg-slate-950 rounded border border-blue-200 dark:border-blue-800">
+                        <strong className="block text-xs uppercase text-slate-500 mb-1">Instruction:</strong>
+                        <ol className="list-decimal ml-4 space-y-1 text-xs font-mono">
+                            <li>Click <span className="font-bold text-mini-red">"Copy Full Fix"</span> below.</li>
+                            <li>Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="underline font-bold text-blue-600">Supabase SQL Editor</a>.</li>
+                            <li>Paste the code and click <span className="font-bold">RUN</span>.</li>
+                            <li>Wait for "Success" message in Supabase.</li>
+                        </ol>
+                    </div>
                 </div>
 
                 {/* VISUALIZER */}

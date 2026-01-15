@@ -1,13 +1,11 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
-import { createClient } from '@supabase/supabase-js';
+import { supabase, isDemoMode } from '../lib/supabase';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Mail, Shield, Car, CheckCircle, Save, Lock, AlertCircle, X, AtSign, Loader2, Key, Wrench, HelpCircle } from 'lucide-react';
+import { User, Mail, Shield, CheckCircle, Save, Lock, AlertCircle, Wrench, HelpCircle, Loader2, AtSign } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import SupabaseTester from '../components/SupabaseTester';
@@ -121,62 +119,49 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            const scopedClient = createClient(finalUrl, finalKey, {
-                global: {
-                    headers: { Authorization: `Bearer ${session.access_token}` }
-                },
-                auth: {
-                    persistSession: false,
-                    autoRefreshToken: false,
-                    detectSessionInUrl: false
-                }
-            });
-
             // Prepare Data
-            const profileData = {
+            const profileData: any = {
                 id: session.user.id,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
-                board_role: formData.board_role || null, // Send explicit null if empty
                 car_model: model,
                 updated_at: new Date().toISOString(),
             };
 
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Request timed out. Database might be waking up.')), 30000)
-            );
+            // Only add board_role if it has a value, to avoid sending nulls to missing columns
+            if (formData.board_role) {
+                profileData.board_role = formData.board_role;
+            }
 
-            // 1. ATTEMPT PRIMARY SAVE (Update)
-            // Use UPDATE first since row exists. Upsert can sometimes trigger permission issues on INSERT policies.
-            let { error: updateError } = await Promise.race([
-                scopedClient.from('profiles').update(profileData).eq('id', session.user.id),
-                timeoutPromise
-            ]) as any;
+            // 1. ATTEMPT PRIMARY SAVE (Update) using the global supabase client
+            // This client already has the correct Auth headers from the active session
+            let finalError: any = null;
 
-            let finalError = updateError;
+            // Try standard update first
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update(profileData)
+                .eq('id', session.user.id);
 
-            // 2. AGGRESSIVE FALLBACK
-            // If UPDATE failed, check if it's the specific board_role issue or general failure
-            if (finalError) {
-                 console.warn("[Profile] Full save failed. Attempting partial save.", finalError.message);
+            if (updateError) {
+                 console.warn("[Profile] Update failed, attempting fallback...", updateError.message);
                  
-                 // Remove board_role from payload to attempt partial save
+                 // Fallback 1: Try stripping board_role (in case column doesn't exist)
                  const { board_role, ...safeData } = profileData;
                  
-                 // Try UPDATE again without the problematic column
-                 const { error: safeError } = await Promise.race([
-                    scopedClient.from('profiles').update(safeData).eq('id', session.user.id),
-                    timeoutPromise
-                 ]) as any;
+                 const { error: safeError } = await supabase
+                    .from('profiles')
+                    .update(safeData)
+                    .eq('id', session.user.id);
 
                  if (!safeError) {
-                     finalError = null; // Success! We recovered.
+                     finalError = null;
                      partialSuccess = true;
                  } else {
-                     // If UPDATE fails entirely, maybe row doesn't exist? Try UPSERT as last resort.
-                     console.warn("[Profile] Partial update failed. Trying UPSERT.", safeError.message);
-                     const { error: upsertError } = await scopedClient.from('profiles').upsert(safeData);
+                     // Fallback 2: Try Upsert (Insert if not exists)
+                     console.warn("[Profile] Update failed. Trying UPSERT.", safeError.message);
+                     const { error: upsertError } = await supabase.from('profiles').upsert(safeData);
                      
                      if (!upsertError) {
                          finalError = null;
@@ -187,15 +172,12 @@ const Profile: React.FC = () => {
                  }
             }
 
-            if (finalError) throw new Error(finalError.message || 'Profile save failed');
+            if (finalError) throw finalError;
 
             // 3. Update Password if provided
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
-                const { error: pwError } = await Promise.race([
-                    updatePassword(newPassword),
-                    timeoutPromise
-                ]) as any;
+                const { error: pwError } = await updatePassword(newPassword);
                 if (pwError) throw new Error('Password update failed: ' + pwError.message);
                 setNewPassword('');
             }
@@ -215,6 +197,7 @@ const Profile: React.FC = () => {
             let errorMessage = error.message || 'An unexpected error occurred.';
             let detail = error.message;
 
+            // Enhanced Error Detection
             if (errorMessage.includes('board_role') || errorMessage.includes('schema cache') || errorMessage.includes('does not exist')) {
                 errorMessage = "Database Sync Error.";
                 detail = "The 'board_role' column is not recognized by the API. This requires a Schema Reload in Supabase.";
