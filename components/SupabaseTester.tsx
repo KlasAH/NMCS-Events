@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
-import { createClient } from '@supabase/supabase-js';
-import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search } from 'lucide-react';
+import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search, Loader2 } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
@@ -105,6 +104,22 @@ type DiagnosticStep = {
     errorCode?: string;
 };
 
+// TIMEOUT HELPER to prevent getting stuck
+async function withTimeout<T>(promise: Promise<T>, ms = 5000): Promise<T> {
+    let timer: any;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Timeout (5s)')), ms);
+    });
+    try {
+        const result = await Promise.race([promise, timeout]);
+        clearTimeout(timer);
+        return result;
+    } catch (e) {
+        clearTimeout(timer);
+        throw e;
+    }
+}
+
 const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const { session } = useAuth();
     const [activeTab, setActiveTab] = useState<'auto' | 'manual' | 'profile'>('auto');
@@ -115,6 +130,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     const [copied, setCopied] = useState(false);
 
     // Manual / Profile Log State
+    const [loadingAction, setLoadingAction] = useState<string | null>(null);
     const [consoleLogs, setConsoleLogs] = useState<{type: 'info'|'error'|'success', msg: string, time: string}[]>([]);
 
     const log = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
@@ -125,7 +141,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     // --- AUTOMATED DIAGNOSTICS ---
     const runDiagnostics = async () => {
         setIsRunning(true);
-        setConsoleLogs([]); // Clear logs on re-run
+        setConsoleLogs([]); 
         
         const initialSteps: DiagnosticStep[] = [
             { id: 'env', label: 'Environment Config', status: 'pending' },
@@ -140,50 +156,63 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return status === 'success';
         };
 
-        // 1. Env
-        updateStep('env', 'running');
-        // @ts-ignore
-        const url = import.meta.env.VITE_SUPABASE_URL;
-        // @ts-ignore
-        const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-        
-        if (!url || !key) {
-             updateStep('env', 'error', 'Missing ENV variables');
-             setIsRunning(false); return;
-        }
-        updateStep('env', 'success', `URL: ${url.substring(0, 15)}...`);
-
-        // 2. Network
-        updateStep('network', 'running');
         try {
-            const start = Date.now();
-            const { error } = await supabase.from('connection_tests').select('id', { count: 'exact', head: true });
-            if (error && error.message.includes('fetch')) throw error;
-            updateStep('network', 'success', `${Date.now() - start}ms`);
-        } catch (e: any) {
-            updateStep('network', 'error', 'Fetch failed');
-            setIsRunning(false); return;
-        }
+            // 1. Env
+            updateStep('env', 'running');
+            // @ts-ignore
+            const url = import.meta.env.VITE_SUPABASE_URL;
+            // @ts-ignore
+            const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+            
+            if (!url || !key) {
+                 updateStep('env', 'error', 'Missing ENV variables');
+                 throw new Error('Missing Env');
+            }
+            updateStep('env', 'success', `URL: ${url.substring(0, 15)}...`);
 
-        // 3. Table Access
-        updateStep('table', 'running');
-        const { error: tableError } = await supabase.from('connection_tests').select('id').limit(1);
-        if (tableError) {
-             updateStep('table', 'error', tableError.message, tableError.code);
-        } else {
-             updateStep('table', 'success', 'Read OK');
-        }
+            // 2. Network
+            updateStep('network', 'running');
+            try {
+                const start = Date.now();
+                // Wrap in timeout
+                const { error } = await withTimeout(
+                    supabase.from('connection_tests').select('id', { count: 'exact', head: true })
+                );
+                
+                if (error && error.message.includes('fetch')) throw error;
+                updateStep('network', 'success', `${Date.now() - start}ms`);
+            } catch (e: any) {
+                updateStep('network', 'error', e.message || 'Timeout');
+                throw e; // Stop here
+            }
 
-        // 4. Schema
-        updateStep('schema', 'running');
-        const { error: schemaError } = await supabase.from('profiles').select('board_role, updated_at').limit(1);
-        if (schemaError) {
-             updateStep('schema', 'error', 'Missing Columns?', schemaError.code);
-        } else {
-             updateStep('schema', 'success', 'Columns Exist');
-        }
+            // 3. Table Access
+            updateStep('table', 'running');
+            const { error: tableError } = await withTimeout(
+                supabase.from('connection_tests').select('id').limit(1)
+            );
+            if (tableError) {
+                 updateStep('table', 'error', tableError.message, tableError.code);
+            } else {
+                 updateStep('table', 'success', 'Read OK');
+            }
 
-        setIsRunning(false);
+            // 4. Schema
+            updateStep('schema', 'running');
+            const { error: schemaError } = await withTimeout(
+                supabase.from('profiles').select('board_role, updated_at').limit(1)
+            );
+            if (schemaError) {
+                 updateStep('schema', 'error', 'Missing Columns?', schemaError.code);
+            } else {
+                 updateStep('schema', 'success', 'Columns Exist');
+            }
+
+        } catch (e) {
+            console.error("Diagnostic Halt", e);
+        } finally {
+            setIsRunning(false);
+        }
     };
 
     // Auto-run when opening modal
@@ -194,38 +223,49 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
     // --- MANUAL TESTS ---
     const manualTest = async (action: 'insert' | 'read' | 'update' | 'delete') => {
+        setLoadingAction(action);
         log(`Starting ${action.toUpperCase()} test on 'connection_tests'...`, 'info');
         
         try {
             if (action === 'insert') {
-                const { data, error } = await supabase.from('connection_tests').insert({ 
-                    message: 'Manual Test', response_data: 'Clicked Button' 
-                }).select().single();
+                const { data, error } = await withTimeout(
+                    supabase.from('connection_tests').insert({ 
+                        message: 'Manual Test', response_data: 'Clicked Button' 
+                    }).select().single()
+                );
                 if (error) throw error;
                 log(`Insert Success! ID: ${data.id}`, 'success');
             }
             if (action === 'read') {
-                const { data, error } = await supabase.from('connection_tests').select('*').limit(3).order('created_at', {ascending:false});
+                const { data, error } = await withTimeout(
+                    supabase.from('connection_tests').select('*').limit(3).order('created_at', {ascending:false})
+                );
                 if (error) throw error;
                 log(`Read Success! Found ${data.length} rows.`, 'success');
                 if(data.length > 0) log(`Row 1: ${JSON.stringify(data[0])}`, 'info');
             }
             if (action === 'update') {
                 // First get a row
-                const { data: rows } = await supabase.from('connection_tests').select('id').limit(1);
-                if (!rows || rows.length === 0) { log('No rows to update. Insert first.', 'error'); return; }
+                const { data: rows } = await withTimeout(supabase.from('connection_tests').select('id').limit(1));
+                if (!rows || rows.length === 0) { log('No rows to update. Insert first.', 'error'); setLoadingAction(null); return; }
                 
-                const { error } = await supabase.from('connection_tests').update({ message: 'Updated ' + Date.now() }).eq('id', rows[0].id);
+                const { error } = await withTimeout(
+                    supabase.from('connection_tests').update({ message: 'Updated ' + Date.now() }).eq('id', rows[0].id)
+                );
                 if (error) throw error;
                 log(`Update Success for ID: ${rows[0].id}`, 'success');
             }
             if (action === 'delete') {
-                const { error } = await supabase.from('connection_tests').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+                const { error } = await withTimeout(
+                    supabase.from('connection_tests').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+                );
                 if (error) throw error;
                 log(`Delete All Success.`, 'success');
             }
         } catch (e: any) {
             log(`${action.toUpperCase()} Failed: ${e.message} (Code: ${e.code || 'N/A'})`, 'error');
+        } finally {
+            setLoadingAction(null);
         }
     };
 
@@ -236,11 +276,14 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             return;
         }
 
+        setLoadingAction(action);
         log(`Starting Profile ${action} check...`, 'info');
 
         try {
             if (action === 'read') {
-                const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                const { data, error } = await withTimeout(
+                    supabase.from('profiles').select('*').eq('id', session.user.id).single()
+                );
                 if (error) throw error;
                 log(`Read Profile Success!`, 'success');
                 log(JSON.stringify(data, null, 2), 'info');
@@ -249,7 +292,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             if (action === 'save_basic') {
                 // Minimal save (safe columns)
                 const updates = { updated_at: new Date().toISOString() };
-                const { error } = await supabase.from('profiles').update(updates).eq('id', session.user.id);
+                const { error } = await withTimeout(
+                    supabase.from('profiles').update(updates).eq('id', session.user.id)
+                );
                 if (error) throw error;
                 log(`Basic Save (updated_at) Success!`, 'success');
             }
@@ -261,7 +306,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     board_role: 'Tester',
                     car_model: 'r53'
                 };
-                const { error } = await supabase.from('profiles').update(updates).eq('id', session.user.id);
+                const { error } = await withTimeout(
+                    supabase.from('profiles').update(updates).eq('id', session.user.id)
+                );
                 if (error) throw error;
                 log(`Full Save (board_role, car_model) Success!`, 'success');
             }
@@ -271,6 +318,8 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             if (e.code === '42703') {
                 log("CRITICAL: Column missing in database. Run the Fix Script in 'Diagnostics' tab.", 'error');
             }
+        } finally {
+            setLoadingAction(null);
         }
     };
 
@@ -355,16 +404,16 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                         <div className="space-y-6">
                             <div className="grid grid-cols-2 gap-3">
                                 <button onClick={() => manualTest('insert')} className="p-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-blue-200">
-                                    <Plus size={20} /> Test Insert
+                                    {loadingAction === 'insert' ? <Loader2 className="animate-spin"/> : <Plus size={20} />} Test Insert
                                 </button>
                                 <button onClick={() => manualTest('read')} className="p-3 bg-green-50 hover:bg-green-100 text-green-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-green-200">
-                                    <Search size={20} /> Test Read
+                                    {loadingAction === 'read' ? <Loader2 className="animate-spin"/> : <Search size={20} />} Test Read
                                 </button>
                                 <button onClick={() => manualTest('update')} className="p-3 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-yellow-200">
-                                    <Edit3 size={20} /> Test Update
+                                    {loadingAction === 'update' ? <Loader2 className="animate-spin"/> : <Edit3 size={20} />} Test Update
                                 </button>
                                 <button onClick={() => manualTest('delete')} className="p-3 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex flex-col items-center gap-1 border border-red-200">
-                                    <Trash2 size={20} /> Test Delete
+                                    {loadingAction === 'delete' ? <Loader2 className="animate-spin"/> : <Trash2 size={20} />} Test Delete
                                 </button>
                             </div>
                             <div className="text-xs text-slate-400 text-center">
@@ -384,13 +433,13 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
                             <div className="grid grid-cols-1 gap-3">
                                 <button onClick={() => profileDebug('read')} className="p-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 rounded-xl font-bold flex items-center justify-center gap-2">
-                                    <Search size={16} /> Read My Profile (Fetch)
+                                    {loadingAction === 'read' ? <Loader2 className="animate-spin"/> : <Search size={16} />} Read My Profile (Fetch)
                                 </button>
                                 <button onClick={() => profileDebug('save_basic')} className="p-3 bg-blue-100 dark:bg-blue-900/40 text-blue-700 hover:bg-blue-200 rounded-xl font-bold flex items-center justify-center gap-2">
-                                    <Save size={16} /> Test Save (Basic Fields)
+                                    {loadingAction === 'save_basic' ? <Loader2 className="animate-spin"/> : <Save size={16} />} Test Save (Basic Fields)
                                 </button>
                                 <button onClick={() => profileDebug('save_full')} className="p-3 bg-mini-red/10 text-mini-red hover:bg-mini-red/20 rounded-xl font-bold flex items-center justify-center gap-2">
-                                    <ShieldAlert size={16} /> Test Save (Full / Risky)
+                                    {loadingAction === 'save_full' ? <Loader2 className="animate-spin"/> : <ShieldAlert size={16} />} Test Save (Full / Risky)
                                 </button>
                             </div>
                              <div className="text-xs text-slate-400 text-center">
