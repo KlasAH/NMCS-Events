@@ -10,7 +10,7 @@ interface SupabaseTesterProps {
     onClose: () => void;
 }
 
-// SQL Fix Script
+// COMPLETE SQL SCHEMA SCRIPT
 const FIX_SQL = `
 -- 1. UTILITIES & EXTENSIONS
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -35,28 +35,9 @@ BEGIN
 END;
 $$;
 
--- 4. CONNECTION TESTER TABLE (Diagnostics)
-CREATE TABLE IF NOT EXISTS public.connection_tests (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  message TEXT,
-  response_data TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
+-- 4. TABLES SETUP
 
--- Allow Public/Anon access for troubleshooting
-DROP POLICY IF EXISTS "Public can test connection" ON public.connection_tests;
-DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
-DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
-DROP POLICY IF EXISTS "Public can update tests" ON public.connection_tests;
-DROP POLICY IF EXISTS "Public can delete tests" ON public.connection_tests;
-
-CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT TO anon, authenticated WITH CHECK (true);
-CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT TO anon, authenticated USING (true);
-CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE TO anon, authenticated USING (true);
-CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE TO anon, authenticated USING (true);
-
--- 5. PROFILES SCHEMA FIX (Critical)
+-- Profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
@@ -68,30 +49,142 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
--- Idempotent column adds
-DO $$
-BEGIN
-    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
-    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
-    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT;
-    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
-    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
-    ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
-EXCEPTION
-    WHEN duplicate_column THEN RAISE NOTICE 'Column already exists in profiles.';
-END $$;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
--- 6. APP SETTINGS
+-- Connection Tests (Diagnostics)
+CREATE TABLE IF NOT EXISTS public.connection_tests (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  message TEXT,
+  response_data TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.connection_tests ENABLE ROW LEVEL SECURITY;
+
+-- Meetings
+CREATE TABLE IF NOT EXISTS public.meetings (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  title TEXT NOT NULL,
+  date DATE NOT NULL,
+  end_date DATE,
+  location_name TEXT NOT NULL,
+  description TEXT,
+  cover_image_url TEXT,
+  pdf_url TEXT, 
+  is_pinned BOOLEAN DEFAULT false,
+  status TEXT DEFAULT 'draft',
+  maps_config JSONB DEFAULT '[]'::jsonb,
+  hotel_info JSONB DEFAULT '{}'::jsonb,
+  parking_info JSONB DEFAULT '{}'::jsonb,
+  custom_data JSONB DEFAULT '{}'::jsonb,
+  extra_info JSONB DEFAULT '[]'::jsonb,
+  gallery_images TEXT[] DEFAULT '{}',
+  google_photos_url TEXT
+);
+ALTER TABLE public.meetings ENABLE ROW LEVEL SECURITY;
+
+-- Itinerary Items
+CREATE TABLE IF NOT EXISTS public.itinerary_items (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
+  date DATE NOT NULL,
+  start_time TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  location_details TEXT,
+  location_map_url TEXT,
+  sort_order INTEGER DEFAULT 0,
+  type TEXT DEFAULT 'activity',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.itinerary_items ENABLE ROW LEVEL SECURITY;
+
+-- Registrations
+CREATE TABLE IF NOT EXISTS public.registrations (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  full_name TEXT NOT NULL,
+  forum_name TEXT,
+  email TEXT NOT NULL,
+  phone TEXT,
+  car_type TEXT,
+  status TEXT CHECK (status IN ('confirmed', 'pending', 'cancelled')) DEFAULT 'pending',
+  registered_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.registrations ENABLE ROW LEVEL SECURITY;
+
+-- Transactions
+CREATE TABLE IF NOT EXISTS public.transactions (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
+  description TEXT NOT NULL,
+  amount NUMERIC(10,2) NOT NULL,
+  type TEXT CHECK (type IN ('income', 'expense')) NOT NULL,
+  date DATE NOT NULL,
+  category TEXT
+);
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+
+-- App Settings
 CREATE TABLE IF NOT EXISTS public.app_settings (
   key TEXT PRIMARY KEY,
   value TEXT,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+
+-- 5. RLS POLICIES (Idempotent)
+
+-- Profiles
+DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
+CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
+-- Connection Tests (Public for Troubleshooting)
+DROP POLICY IF EXISTS "Public can insert tests" ON public.connection_tests;
+CREATE POLICY "Public can insert tests" ON public.connection_tests FOR INSERT TO anon, authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Public can read tests" ON public.connection_tests;
+CREATE POLICY "Public can read tests" ON public.connection_tests FOR SELECT TO anon, authenticated USING (true);
+DROP POLICY IF EXISTS "Public can update tests" ON public.connection_tests;
+CREATE POLICY "Public can update tests" ON public.connection_tests FOR UPDATE TO anon, authenticated USING (true);
+DROP POLICY IF EXISTS "Public can delete tests" ON public.connection_tests;
+CREATE POLICY "Public can delete tests" ON public.connection_tests FOR DELETE TO anon, authenticated USING (true);
+
+-- Meetings
+DROP POLICY IF EXISTS "Public meetings read" ON public.meetings;
+CREATE POLICY "Public meetings read" ON public.meetings FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admin meetings all" ON public.meetings;
+CREATE POLICY "Admin meetings all" ON public.meetings FOR ALL USING (is_admin());
+
+-- Itinerary
+DROP POLICY IF EXISTS "Public itinerary read" ON public.itinerary_items;
+CREATE POLICY "Public itinerary read" ON public.itinerary_items FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admin itinerary all" ON public.itinerary_items;
+CREATE POLICY "Admin itinerary all" ON public.itinerary_items FOR ALL USING (is_admin());
+
+-- Registrations
+DROP POLICY IF EXISTS "Public register" ON public.registrations;
+CREATE POLICY "Public register" ON public.registrations FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "User view own regs" ON public.registrations;
+CREATE POLICY "User view own regs" ON public.registrations FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Admin manage regs" ON public.registrations;
+CREATE POLICY "Admin manage regs" ON public.registrations FOR ALL USING (is_admin());
+
+-- Transactions
+DROP POLICY IF EXISTS "Admin manage tx" ON public.transactions;
+CREATE POLICY "Admin manage tx" ON public.transactions FOR ALL USING (is_admin());
+
+-- Settings
+DROP POLICY IF EXISTS "Public settings read" ON public.app_settings;
 CREATE POLICY "Public settings read" ON public.app_settings FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admin settings write" ON public.app_settings;
 CREATE POLICY "Admin settings write" ON public.app_settings FOR ALL USING (is_admin());
 
--- 7. REFRESH SCHEMA CACHE
+-- 6. REFRESH CACHE
 NOTIFY pgrst, 'reload schema';
 `;
 
@@ -105,13 +198,13 @@ type DiagnosticStep = {
 };
 
 // TIMEOUT HELPER to prevent getting stuck
-async function withTimeout<T>(promise: Promise<T>, ms = 5000): Promise<T> {
+async function withTimeout<T>(promise: PromiseLike<T>, ms = 5000): Promise<T> {
     let timer: any;
     const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('Timeout (5s)')), ms);
     });
     try {
-        const result = await Promise.race([promise, timeout]);
+        const result = await Promise.race([Promise.resolve(promise), timeout]);
         clearTimeout(timer);
         return result;
     } catch (e) {
