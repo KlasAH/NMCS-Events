@@ -57,33 +57,45 @@ const Profile: React.FC = () => {
 
         const fetchProfile = async () => {
             try {
-                // Fetch profile data
-                const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                // 1. Fetch profile data (Basic info + Profile Role)
+                const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
                 
                 if (error) {
                     console.error('Error fetching profile:', error);
                 }
 
-                if (data) {
+                // 2. Determine System Role (Check Fallback Table 'user_roles' if profile says user)
+                let finalRole = profile?.role || 'user';
+                
+                // If profile says 'user', check if they are actually board/admin in the permission table
+                if (finalRole === 'user') {
+                    const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle();
+                    if (roleData?.role && roleData.role !== 'user') {
+                        finalRole = roleData.role;
+                    }
+                }
+
+                if (profile) {
                     setFormData({
-                        full_name: data.full_name || session.user.user_metadata?.full_name || '',
-                        username: data.username || session.user.user_metadata?.username || '',
-                        email: data.email || session.user.email || '',
+                        full_name: profile.full_name || session.user.user_metadata?.full_name || '',
+                        username: profile.username || session.user.user_metadata?.username || '',
+                        email: profile.email || session.user.email || '',
                         // Map board_role safely. If DB has NULL, we default to ''.
-                        board_role: data.board_role || '', 
-                        system_role: data.role || 'user'
+                        board_role: profile.board_role || '', 
+                        system_role: finalRole
                     });
                     
-                    if (data.car_model && MODELS.some(m => m.id === data.car_model)) {
-                        setModel(data.car_model as MiniModel);
+                    if (profile.car_model && MODELS.some(m => m.id === profile.car_model)) {
+                        setModel(profile.car_model as MiniModel);
                     }
                 } else {
+                    // Fallback if no profile exists yet
                     setFormData({
                         full_name: session.user.user_metadata?.full_name || '',
                         username: session.user.user_metadata?.username || '',
                         email: session.user.email || '',
                         board_role: '',
-                        system_role: 'user'
+                        system_role: finalRole
                     });
                 }
             } catch (err) {
@@ -134,45 +146,55 @@ const Profile: React.FC = () => {
                 profileData.board_role = formData.board_role;
             }
 
-            // 1. ATTEMPT PRIMARY SAVE (Update) using the global supabase client
-            // This client already has the correct Auth headers from the active session
-            let finalError: any = null;
+            // TIMEOUT PROMISE: Prevent infinite hanging
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Request timed out. Check internet connection.')), 10000)
+            );
 
-            // Try standard update first
-            const { error: updateError } = await supabase
-                .from('profiles')
-                .update(profileData)
-                .eq('id', session.user.id);
+            // 1. ATTEMPT PRIMARY SAVE (Update)
+            const saveOperation = async () => {
+                let finalError: any = null;
 
-            if (updateError) {
-                 console.warn("[Profile] Update failed, attempting fallback...", updateError.message);
-                 
-                 // Fallback 1: Try stripping board_role (in case column doesn't exist)
-                 const { board_role, ...safeData } = profileData;
-                 
-                 const { error: safeError } = await supabase
+                // Try standard update first
+                const { error: updateError } = await supabase
                     .from('profiles')
-                    .update(safeData)
+                    .update(profileData)
                     .eq('id', session.user.id);
 
-                 if (!safeError) {
-                     finalError = null;
-                     partialSuccess = true;
-                 } else {
-                     // Fallback 2: Try Upsert (Insert if not exists)
-                     console.warn("[Profile] Update failed. Trying UPSERT.", safeError.message);
-                     const { error: upsertError } = await supabase.from('profiles').upsert(safeData);
+                if (updateError) {
+                     console.warn("[Profile] Update failed, attempting fallback...", updateError.message);
                      
-                     if (!upsertError) {
+                     // Fallback 1: Try stripping board_role (in case column doesn't exist)
+                     const { board_role, ...safeData } = profileData;
+                     
+                     const { error: safeError } = await supabase
+                        .from('profiles')
+                        .update(safeData)
+                        .eq('id', session.user.id);
+
+                     if (!safeError) {
                          finalError = null;
                          partialSuccess = true;
                      } else {
-                         finalError = upsertError;
+                         // Fallback 2: Try Upsert (Insert if not exists)
+                         console.warn("[Profile] Update failed. Trying UPSERT.", safeError.message);
+                         const { error: upsertError } = await supabase.from('profiles').upsert(safeData);
+                         
+                         if (!upsertError) {
+                             finalError = null;
+                             partialSuccess = true;
+                         } else {
+                             finalError = upsertError;
+                         }
                      }
-                 }
-            }
+                }
+                return finalError;
+            };
 
-            if (finalError) throw finalError;
+            // Race the save against the timeout
+            const errorResult = await Promise.race([saveOperation(), timeoutPromise]);
+
+            if (errorResult) throw errorResult;
 
             // 3. Update Password if provided
             if (newPassword) {
@@ -201,6 +223,9 @@ const Profile: React.FC = () => {
             if (errorMessage.includes('board_role') || errorMessage.includes('schema cache') || errorMessage.includes('does not exist')) {
                 errorMessage = "Database Sync Error.";
                 detail = "The 'board_role' column is not recognized by the API. This requires a Schema Reload in Supabase.";
+            } else if (errorMessage.includes('timed out')) {
+                errorMessage = "Connection Timeout";
+                detail = "The server is taking too long to respond. Your changes might not have been saved.";
             }
 
             setStatusMsg({ type: 'error', text: errorMessage, detail });
@@ -354,12 +379,14 @@ const Profile: React.FC = () => {
                                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">System Permission</label>
                                                 <div className="group relative">
                                                     <HelpCircle size={14} className="text-slate-400 cursor-help" />
-                                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
                                                         Controls what you can access (Admin, User, etc). Stored in 'role' column.
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="px-5 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border border-slate-200 dark:border-slate-700 flex items-center gap-2 uppercase text-sm cursor-not-allowed">
+                                            <div className={`px-5 py-3 rounded-xl text-slate-600 dark:text-slate-400 font-bold border border-slate-200 dark:border-slate-700 flex items-center gap-2 uppercase text-sm cursor-not-allowed
+                                                ${formData.system_role === 'board' || formData.system_role === 'admin' ? 'bg-mini-red/10 text-mini-red border-mini-red/20' : 'bg-slate-100 dark:bg-slate-800'}
+                                            `}>
                                                 <Shield size={16} /> {formData.system_role}
                                             </div>
                                         </div>
