@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
-import { createClient } from '@supabase/supabase-js';
+import { supabase, isDemoMode } from '../lib/supabase';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -58,18 +57,27 @@ const Profile: React.FC = () => {
 
         const fetchProfile = async () => {
             try {
-                // 1. Fetch profile data (Basic info + Profile Role)
-                const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                // Fetch profile and user_roles in parallel for robustness
+                const [profileReq, roleReq] = await Promise.all([
+                    supabase.from('profiles').select('*').eq('id', session.user.id).single(),
+                    supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle()
+                ]);
+
+                const profile = profileReq.data;
+                const roleData = roleReq.data;
+
+                // Determine System Role Logic
+                // Priority: User Roles Table > Profile Table > Metadata > Default 'user'
+                let finalRole = 'user';
                 
-                // 2. Determine System Role (Check Fallback Table 'user_roles' if profile says user)
-                let finalRole = profile?.role || 'user';
-                
-                // If profile says 'user', check if they are actually board/admin in the permission table
-                if (finalRole === 'user') {
-                    const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle();
-                    if (roleData?.role && roleData.role !== 'user') {
-                        finalRole = roleData.role;
-                    }
+                if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
+                    finalRole = roleData.role;
+                } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
+                    finalRole = profile.role;
+                } else {
+                     // Last resort: Check auth metadata
+                     const metaRole = session.user.user_metadata?.role;
+                     if (metaRole) finalRole = metaRole;
                 }
 
                 if (profile) {
@@ -95,7 +103,7 @@ const Profile: React.FC = () => {
                     });
                 }
             } catch (err) {
-                console.error(err);
+                console.error("Profile fetch error:", err);
             } finally {
                 setLoadingData(false);
             }
@@ -123,39 +131,47 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // 1. CREATE STATELESS CLIENT
-            // This bypasses any connection issues with the global singleton
-            const tempClient = createClient(finalUrl, finalKey, {
-                global: {
-                    headers: { Authorization: `Bearer ${session.access_token}` }
-                },
-                auth: { persistSession: false }
-            });
-
-            // 2. PREPARE DATA
-            const profileData = {
+            // Safe Save Strategy:
+            // 1. Save Core Data (Columns that definitely exist)
+            // 2. Try Save Extra Data (Columns that might be missing like board_role)
+            
+            const coreData = {
                 id: session.user.id,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
                 car_model: model,
-                board_role: formData.board_role || null, // Ensure null if empty
                 updated_at: new Date().toISOString(),
             };
 
-            // 3. EXECUTE UPSERT (Atomic Update/Insert)
-            // Using a timeout race condition to ensure UI doesn't freeze
-            const savePromise = tempClient.from('profiles').upsert(profileData);
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Connection timed out. Check network.')), 15000)
-            );
+            // Attempt Core Save
+            const { error: coreError } = await supabase.from('profiles').upsert(coreData);
 
-            // @ts-ignore
-            const { error } = await Promise.race([savePromise, timeoutPromise]);
+            if (coreError) {
+                throw coreError;
+            }
 
-            if (error) throw error;
+            let warningMsg = '';
 
-            // 4. Update Password (Optional)
+            // Attempt Extra Data Save (board_role)
+            if (formData.board_role) {
+                try {
+                    const { error: extraError } = await supabase
+                        .from('profiles')
+                        .update({ board_role: formData.board_role })
+                        .eq('id', session.user.id);
+                    
+                    if (extraError) {
+                        console.warn("Could not save board_role (likely missing column):", extraError.message);
+                        warningMsg = "Saved, but 'Board Role' could not be synced. Database needs update.";
+                    }
+                } catch (e) {
+                    // Ignore crash on extra fields
+                    warningMsg = "Saved core profile, but extended fields failed.";
+                }
+            }
+
+            // 3. Update Password (Optional)
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 const { error: pwError } = await updatePassword(newPassword);
@@ -163,18 +179,16 @@ const Profile: React.FC = () => {
                 setNewPassword('');
             }
 
-            setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+            if (warningMsg) {
+                 setStatusMsg({ type: 'warning', text: warningMsg, detail: "Run the Database Fixer to enable all fields." });
+            } else {
+                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+            }
 
         } catch (error: any) {
             console.error("Save Error:", error);
             let errorMessage = error.message || 'An unexpected error occurred.';
             let detail = error.message;
-
-            // Database Schema mismatch detection
-            if (errorMessage.includes('board_role') || errorMessage.includes('column')) {
-                errorMessage = "Database Schema Mismatch";
-                detail = "The database is missing columns. Please run the fixer.";
-            }
 
             setStatusMsg({ type: 'error', text: errorMessage, detail });
         } finally {
@@ -220,11 +234,11 @@ const Profile: React.FC = () => {
                             </div>
                             
                             {/* Detail Message */}
-                            {statusMsg.detail && statusMsg.type === 'error' && (
+                            {statusMsg.detail && (
                                 <p className="text-xs font-normal opacity-80 max-w-lg mt-1 font-mono bg-white/50 px-2 py-1 rounded">{statusMsg.detail}</p>
                             )}
 
-                            {/* FIX BUTTON - ALWAYS VISIBLE ON ERROR */}
+                            {/* FIX BUTTON - ALWAYS VISIBLE ON ERROR OR WARNING */}
                             {(statusMsg.type === 'error' || statusMsg.type === 'warning') && (
                                 <button 
                                     onClick={() => setShowFixer(true)}
