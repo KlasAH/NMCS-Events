@@ -1,5 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -23,6 +24,9 @@ const Profile: React.FC = () => {
     const { session, loading, updatePassword } = useAuth();
     const { model, setModel } = useTheme();
     const { t } = useLanguage();
+    
+    // Safety check to prevent infinite loops if session flips rapidly
+    const userId = session?.user?.id;
 
     // Form State
     const [formData, setFormData] = useState({
@@ -42,9 +46,9 @@ const Profile: React.FC = () => {
     const [newPassword, setNewPassword] = useState('');
 
     useEffect(() => {
-        if (!session || isDemoMode) {
+        if (!userId || isDemoMode) {
             setLoadingData(false);
-            if(isDemoMode) {
+            if(isDemoMode && session) {
                 setFormData({
                     full_name: 'Demo User',
                     username: '@demo',
@@ -56,19 +60,23 @@ const Profile: React.FC = () => {
             return;
         }
 
+        let isMounted = true;
+        
         const fetchProfile = async () => {
+            setLoadingData(true);
             try {
-                // Fetch profile and user_roles in parallel for robustness
+                // Fetch profile and user_roles in parallel
                 const [profileReq, roleReq] = await Promise.all([
-                    supabase.from('profiles').select('*').eq('id', session.user.id).single(),
-                    supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle()
+                    supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+                    supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle()
                 ]);
+
+                if (!isMounted) return;
 
                 const profile = profileReq.data;
                 const roleData = roleReq.data;
 
                 // Determine System Role Logic
-                // Priority: User Roles Table > Profile Table > Metadata > Default 'user'
                 let finalRole = 'user';
                 
                 if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
@@ -76,29 +84,30 @@ const Profile: React.FC = () => {
                 } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
                     finalRole = profile.role;
                 } else {
-                     // Last resort: Check auth metadata
-                     const metaRole = session.user.user_metadata?.role;
+                     const metaRole = session?.user?.user_metadata?.role;
                      if (metaRole) finalRole = metaRole;
                 }
 
                 if (profile) {
                     setFormData({
-                        full_name: profile.full_name || session.user.user_metadata?.full_name || '',
-                        username: profile.username || session.user.user_metadata?.username || '',
-                        email: profile.email || session.user.email || '',
+                        full_name: profile.full_name || session?.user?.user_metadata?.full_name || '',
+                        username: profile.username || session?.user?.user_metadata?.username || '',
+                        email: profile.email || session?.user?.email || '',
                         board_role: profile.board_role || '', 
                         system_role: finalRole
                     });
                     
+                    // Critical Fix: Only call setModel if it actually changes, preventing context re-render loops
                     if (profile.car_model && MODELS.some(m => m.id === profile.car_model)) {
-                        setModel(profile.car_model as MiniModel);
+                        if (model !== profile.car_model) {
+                            setModel(profile.car_model as MiniModel);
+                        }
                     }
                 } else {
-                    // Fallback if no profile exists yet
                     setFormData({
-                        full_name: session.user.user_metadata?.full_name || '',
-                        username: session.user.user_metadata?.username || '',
-                        email: session.user.email || '',
+                        full_name: session?.user?.user_metadata?.full_name || '',
+                        username: session?.user?.user_metadata?.username || '',
+                        email: session?.user?.email || '',
                         board_role: '',
                         system_role: finalRole
                     });
@@ -106,12 +115,14 @@ const Profile: React.FC = () => {
             } catch (err) {
                 console.error("Profile fetch error:", err);
             } finally {
-                setLoadingData(false);
+                if (isMounted) setLoadingData(false);
             }
         };
 
         fetchProfile();
-    }, [session]);
+        
+        return () => { isMounted = false; };
+    }, [userId]); // Dependency on userId string instead of session object
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -119,12 +130,11 @@ const Profile: React.FC = () => {
     };
 
     const handleSaveAll = async () => {
-        if (!session?.user?.id) return;
+        if (!userId) return;
 
         setSaving(true);
         setStatusMsg(null);
         
-        // 1. TIMEOUT GUARD
         const timeoutGuard = new Promise((_, reject) => 
             setTimeout(() => reject(new Error("Connection timeout. Server took too long to respond.")), 10000)
         );
@@ -137,48 +147,36 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // 2. ISOLATED CLIENT
             const tempClient = createClient(finalUrl, finalKey, {
-                global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+                global: { headers: { Authorization: `Bearer ${session?.access_token}` } },
                 auth: { persistSession: false }
             });
 
-            // 3. PREPARE DATA
             const updates: any = {
-                id: session.user.id,
+                id: userId,
                 full_name: formData.full_name,
                 username: formData.username,
                 email: formData.email, 
                 car_model: model,
                 updated_at: new Date().toISOString(),
-                // Optimistically include board_role. We handle failure below.
                 ...(formData.board_role ? { board_role: formData.board_role } : {})
             };
 
-            // 4. ATTEMPT SAVE (RACED AGAINST TIMEOUT)
             const saveOperation = async () => {
                 const { error } = await tempClient.from('profiles').upsert(updates);
                 
                 if (error) {
-                    // DETECT SCHEMA MISMATCH (Missing columns like 'updated_at' or 'board_role')
-                    // Postgres error 42703 = undefined_column
-                    if (error.code === '42703') {
-                        console.warn("[Profile] Schema mismatch (Missing Column). Retrying with minimal fields.");
-                        
-                        // Retry with ABSOLUTE MINIMUM (No updated_at, No board_role)
+                    if (error.code === '42703') { // Undefined Column
+                        console.warn("[Profile] Schema mismatch. Retrying with minimal fields.");
                         const minimalUpdates = {
-                            id: session.user.id,
+                            id: userId,
                             full_name: formData.full_name,
                             username: formData.username,
                             email: formData.email,
                             car_model: model
                         };
-                        
                         const { error: retryError } = await tempClient.from('profiles').upsert(minimalUpdates);
-                        
                         if (retryError) throw retryError;
-                        
-                        // Return a special flag indicating partial success
                         return { partial: true };
                     }
                     throw error;
@@ -186,10 +184,8 @@ const Profile: React.FC = () => {
                 return { partial: false };
             };
 
-            // Run the race
             const result = await Promise.race([saveOperation(), timeoutGuard]) as { partial: boolean };
 
-            // 5. UPDATE PASSWORD (Optional)
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 const { error: pwError } = await updatePassword(newPassword);
@@ -197,7 +193,6 @@ const Profile: React.FC = () => {
                 setNewPassword('');
             }
 
-            // 6. FINAL STATUS
             if (result.partial) {
                  setStatusMsg({ 
                      type: 'warning', 
@@ -223,7 +218,7 @@ const Profile: React.FC = () => {
         }
     };
 
-    if (loading || loadingData) return (
+    if (loading || (loadingData && session)) return (
         <div className="min-h-screen flex items-center justify-center">
             <Loader2 className="animate-spin text-mini-red" size={48} />
         </div>
@@ -231,19 +226,13 @@ const Profile: React.FC = () => {
     
     if (!session) return <Navigate to="/login" replace />;
 
-    const INPUT_STYLE = "w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all";
-    const LABEL_STYLE = "block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2";
-
     return (
         <div className="pt-24 pb-12 px-4 max-w-5xl mx-auto min-h-screen">
-            
-            {/* MAIN CONTAINER FRAME */}
             <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border-4 border-slate-100 dark:border-slate-800 overflow-hidden relative"
             >
-                {/* STATUS BAR (Notification) */}
                 <AnimatePresence>
                     {statusMsg && (
                         <motion.div 
@@ -259,13 +248,9 @@ const Profile: React.FC = () => {
                                 {statusMsg.type === 'success' ? <CheckCircle size={18}/> : <AlertCircle size={18}/>}
                                 {statusMsg.text}
                             </div>
-                            
-                            {/* Detail Message */}
                             {statusMsg.detail && (
                                 <p className="text-xs font-normal opacity-80 max-w-lg mt-1 font-mono bg-white/50 px-2 py-1 rounded">{statusMsg.detail}</p>
                             )}
-
-                            {/* FIX BUTTON - ALWAYS VISIBLE ON ERROR OR WARNING */}
                             {(statusMsg.type === 'error' || statusMsg.type === 'warning') && (
                                 <button 
                                     onClick={() => setShowFixer(true)}
@@ -279,7 +264,6 @@ const Profile: React.FC = () => {
                 </AnimatePresence>
 
                 <div className="p-8 md:p-12">
-                    {/* HEADER SECTION */}
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10 pb-8 border-b border-slate-100 dark:border-slate-800">
                         <div>
                             <h1 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3">
@@ -287,8 +271,6 @@ const Profile: React.FC = () => {
                             </h1>
                             <p className="text-slate-500 mt-2 font-medium">Manage your personal information and preferences.</p>
                         </div>
-
-                        {/* SAVE BUTTON - Top Right */}
                         <button 
                             type="button"
                             onClick={handleSaveAll}
@@ -300,20 +282,12 @@ const Profile: React.FC = () => {
                                     : 'bg-mini-black dark:bg-white text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200 shadow-black/20'}
                             `}
                         >
-                            {saving ? (
-                                <><Loader2 className="animate-spin" size={20}/> Saving...</>
-                            ) : (
-                                <><Save size={20} /> {t('save')}</>
-                            )}
+                            {saving ? <><Loader2 className="animate-spin" size={20}/> Saving...</> : <><Save size={20} /> {t('save')}</>}
                         </button>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-                        
-                        {/* LEFT COLUMN: Inputs */}
                         <div className="lg:col-span-7 space-y-10">
-                            
-                            {/* Personal Info */}
                             <section>
                                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
                                     <span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">1</span>
@@ -322,39 +296,38 @@ const Profile: React.FC = () => {
                                 <div className="space-y-6">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div>
-                                            <label className={LABEL_STYLE}>{t('fullName')}</label>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('fullName')}</label>
                                             <div className="relative">
                                                 <input 
                                                     value={formData.full_name}
                                                     onChange={(e) => handleInputChange('full_name', e.target.value)}
-                                                    className={INPUT_STYLE}
+                                                    className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all"
                                                     placeholder="Klas Ahlman"
                                                 />
                                                 <User className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                             </div>
                                         </div>
                                         <div>
-                                            <label className={LABEL_STYLE}>{t('username')}</label>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('username')}</label>
                                             <div className="relative">
                                                 <input 
                                                     value={formData.username}
                                                     onChange={(e) => handleInputChange('username', e.target.value)}
-                                                    className={INPUT_STYLE}
+                                                    className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all"
                                                     placeholder="@klas"
                                                 />
                                                 <AtSign className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                             </div>
                                         </div>
                                     </div>
-                                    
                                     <div>
-                                        <label className={LABEL_STYLE}>{t('email')}</label>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('email')}</label>
                                         <div className="relative">
                                             <input 
                                                 type="email"
                                                 value={formData.email}
                                                 onChange={(e) => handleInputChange('email', e.target.value)}
-                                                className={INPUT_STYLE}
+                                                className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all"
                                                 placeholder="email@example.com"
                                             />
                                             <Mail className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -362,7 +335,6 @@ const Profile: React.FC = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {/* System Role - Read Only */}
                                         <div>
                                             <div className="flex items-center gap-2 mb-2">
                                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">System Permission</label>
@@ -380,7 +352,6 @@ const Profile: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        {/* Board Title - Editable */}
                                         <div>
                                             <div className="flex items-center gap-2 mb-2">
                                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Board Title (Display)</label>
@@ -389,7 +360,7 @@ const Profile: React.FC = () => {
                                                 <select 
                                                     value={formData.board_role}
                                                     onChange={(e) => handleInputChange('board_role', e.target.value)}
-                                                    className={`${INPUT_STYLE} appearance-none cursor-pointer`}
+                                                    className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all appearance-none cursor-pointer"
                                                 >
                                                     <option value="">(None)</option>
                                                     {BOARD_ROLES.map(role => (
@@ -407,14 +378,13 @@ const Profile: React.FC = () => {
 
                             <div className="w-full h-px bg-slate-100 dark:bg-slate-800"></div>
 
-                            {/* Password Section */}
                             <section>
                                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
                                     <span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">2</span>
                                     {t('changePassword')}
                                 </h3>
                                 <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
-                                    <label className={LABEL_STYLE}>{t('newPassword')}</label>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('newPassword')}</label>
                                     <div className="relative">
                                         <input 
                                             type="password" 
@@ -422,7 +392,7 @@ const Profile: React.FC = () => {
                                             onChange={(e) => setNewPassword(e.target.value)}
                                             placeholder="Enter new password to update"
                                             minLength={6}
-                                            className={`${INPUT_STYLE} bg-white dark:bg-slate-900 pr-12`}
+                                            className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all pr-12"
                                         />
                                         <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                     </div>
@@ -435,7 +405,6 @@ const Profile: React.FC = () => {
                             </section>
                         </div>
 
-                        {/* RIGHT COLUMN: Car Selector */}
                         <div className="lg:col-span-5">
                             <section className="h-full">
                                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">

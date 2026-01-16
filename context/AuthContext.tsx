@@ -1,5 +1,6 @@
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { Session, Provider, createClient } from '@supabase/supabase-js';
 
@@ -25,6 +26,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [authStatus, setAuthStatus] = useState<string>('Initializing...');
   const [autoLogoutTime, setAutoLogoutTime] = useState<number>(8 * 60 * 60 * 1000); // Default 8 hours
+  
+  // Track last checked access token to prevent redundant checks
+  const lastCheckedToken = useRef<string | null>(null);
 
   // SETTINGS LISTENER (Realtime)
   useEffect(() => {
@@ -83,6 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
+        // Always check on first load
         checkAdmin(session);
       } else {
         setLoading(false);
@@ -95,12 +100,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      
       if (session) {
-          // Reset loading to true to prevent premature 'Restricted' access during role check
-          // Only set loading if we aren't already admin, to avoid UI flickering
-          if (!isAdmin) setLoading(true);
-          checkAdmin(session);
+          // Optimization: Only check admin if token changed significantly or we haven't checked yet
+          if (session.access_token !== lastCheckedToken.current) {
+              if (!isAdmin) setLoading(true); // Only set loading if we aren't already admin to avoid flicker
+              checkAdmin(session);
+          } else {
+              // Same session, assume admin state is stable. Ensure loading is false.
+              setLoading(false);
+          }
       } else {
+          lastCheckedToken.current = null;
           setIsAdmin(false);
           setLoading(false);
           setAuthStatus('Signed Out');
@@ -139,6 +150,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const checkAdmin = async (currentSession: Session) => {
     setAuthStatus('Checking Admin Role...');
+    lastCheckedToken.current = currentSession.access_token;
+    
     try {
       console.log(`[Auth] Checking admin status for ${currentSession.user.email}...`);
       
@@ -163,7 +176,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   persistSession: false, 
                   autoRefreshToken: false,
                   detectSessionInUrl: false,
-                  storageKey: 'memory' // <--- Fix for GoTrue warning
+                  storageKey: 'memory' 
               }
           });
 
@@ -227,6 +240,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAdmin(false);
     setLoading(false);
     setAuthStatus('Signed Out');
+    lastCheckedToken.current = null;
 
     if (isDemoMode) return;
 
