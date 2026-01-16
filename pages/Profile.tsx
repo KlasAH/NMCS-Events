@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
+import { supabase, isDemoMode } from '../lib/supabase';
 // @ts-ignore
-import { useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Mail, Shield, CheckCircle, Save, Lock, AlertCircle, Wrench, HelpCircle, Loader2, AtSign } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
@@ -19,10 +19,9 @@ const BOARD_ROLES = [
 ];
 
 const Profile: React.FC = () => {
-    const { session, loading, updatePassword, signOut } = useAuth();
+    const { session, loading, updatePassword } = useAuth();
     const { model, setModel } = useTheme();
     const { t } = useLanguage();
-    const navigate = useNavigate();
 
     // Form State
     const [formData, setFormData] = useState({
@@ -41,45 +40,33 @@ const Profile: React.FC = () => {
     // Password State
     const [newPassword, setNewPassword] = useState('');
 
-    // Auth Guard - Use Effect instead of Render Return to prevent flicker-redirects
     useEffect(() => {
-        if (!loading && !session) {
-            navigate('/login', { replace: true });
-        }
-    }, [session, loading, navigate]);
-
-    useEffect(() => {
-        if (!session) {
-            if (!loading) setLoadingData(false);
+        if (!session || isDemoMode) {
+            setLoadingData(false);
+            if(isDemoMode) {
+                setFormData({
+                    full_name: 'Demo User',
+                    username: '@demo',
+                    email: 'demo@example.com',
+                    board_role: 'Ordförande',
+                    system_role: 'admin'
+                });
+            }
             return;
         }
 
         const fetchProfile = async () => {
             try {
-                if(isDemoMode) {
-                    setFormData({
-                        full_name: 'Demo User',
-                        username: '@demo',
-                        email: 'demo@example.com',
-                        board_role: 'Ordförande',
-                        system_role: 'admin'
-                    });
-                    setLoadingData(false);
-                    return;
+                // Fetch profile and user_roles
+                const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                
+                if (error && error.code !== 'PGRST116') {
+                    console.error('Error fetching profile:', error);
                 }
 
-                // Fetch profile and user_roles in parallel for robustness
-                const [profileReq, roleReq] = await Promise.all([
-                    supabase.from('profiles').select('*').eq('id', session.user.id).single(),
-                    supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle()
-                ]);
+                const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle();
 
-                const profile = profileReq.data;
-                const roleData = roleReq.data;
-
-                // Determine System Role Logic
                 let finalRole = 'user';
-                
                 if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
                     finalRole = roleData.role;
                 } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
@@ -102,6 +89,7 @@ const Profile: React.FC = () => {
                         setModel(profile.car_model as MiniModel);
                     }
                 } else {
+                    // Pre-fill from auth metadata if profile missing
                     setFormData({
                         full_name: session.user.user_metadata?.full_name || '',
                         username: session.user.user_metadata?.username || '',
@@ -118,24 +106,19 @@ const Profile: React.FC = () => {
         };
 
         fetchProfile();
-    }, [session, loading]);
+    }, [session]);
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
         if (statusMsg) setStatusMsg(null);
     };
 
-    const handleSaveAll = async (e?: React.MouseEvent) => {
+    const handleSaveAll = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (!session?.user?.id) return;
 
         setSaving(true);
         setStatusMsg(null);
-        
-        // 1. TIMEOUT GUARD
-        const timeoutGuard = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Connection timeout. Server took too long to respond.")), 10000)
-        );
 
         try {
             if (isDemoMode) {
@@ -145,20 +128,10 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // 2. GET FRESH TOKEN (Critical fix for "Auto Logout" issues)
-            // We must ensure the token is valid before making a raw fetch.
-            // Using session.access_token from context might be slightly stale if a refresh happened in background.
-            const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-            
-            if (sessionError || !sessionData.session) {
-                console.error("Session refresh failed during save:", sessionError);
-                // If we can't get a session, we shouldn't try to save. But don't auto-logout here, just warn.
-                throw new Error("Your session has expired. Please refresh the page.");
-            }
-            
-            const freshToken = sessionData.session.access_token;
+            // SAFETY: Ensure session is valid before writing to DB
+            const { error: refreshError } = await supabase.auth.getSession();
+            if (refreshError) throw new Error("Session expired. Please log in again.");
 
-            // 3. RAW FETCH EXECUTION
             const updates: any = {
                 id: session.user.id,
                 full_name: formData.full_name,
@@ -169,53 +142,38 @@ const Profile: React.FC = () => {
                 ...(formData.board_role ? { board_role: formData.board_role } : {})
             };
 
-            const performSave = async (dataToSave: any) => {
-                const response = await fetch(`${finalUrl}/rest/v1/profiles`, {
-                    method: 'POST',
-                    headers: {
-                        'apikey': finalKey,
-                        'Authorization': `Bearer ${freshToken}`,
-                        'Content-Type': 'application/json',
-                        'Prefer': 'resolution=merge-duplicates'
-                    },
-                    body: JSON.stringify(dataToSave)
-                });
-
-                if (!response.ok) {
-                    const errJson = await response.json().catch(() => ({}));
-                    const error = new Error(errJson.message || response.statusText);
-                    // @ts-ignore
-                    error.code = errJson.code;
-                    throw error;
-                }
-                
-                return { partial: false };
+            const performSave = async (data: any) => {
+                const { error } = await supabase.from('profiles').upsert(data);
+                if (error) throw error;
             };
 
-            // 4. ATTEMPT SAVE
-            const saveOperation = async () => {
-                try {
-                    return await performSave(updates);
-                } catch (error: any) {
-                    if (error.code === '42703') {
-                        console.warn("[Profile] Schema mismatch (Missing Column). Retrying with minimal fields.");
-                        const minimalUpdates = {
-                            id: session.user.id,
-                            full_name: formData.full_name,
-                            username: formData.username,
-                            email: formData.email,
-                            car_model: model
-                        };
-                        await performSave(minimalUpdates);
-                        return { partial: true };
-                    }
-                    throw error;
-                }
-            };
+            // Attempt save with failover for missing columns (Schema drift protection)
+            try {
+                await performSave(updates);
+                setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+            } catch (error: any) {
+                 // Check for "Undefined Column" (Postgres 42703)
+                 if (error.code === '42703') {
+                     console.warn("Schema mismatch. Retrying with minimal fields.");
+                     const minimalUpdates = {
+                        id: session.user.id,
+                        full_name: formData.full_name,
+                        username: formData.username,
+                        email: formData.email,
+                        car_model: model
+                     };
+                     await performSave(minimalUpdates);
+                     setStatusMsg({ 
+                        type: 'warning', 
+                        text: "Saved with warnings.", 
+                        detail: "Profile saved, but the database is missing some columns (e.g. board_role). Use the Fixer." 
+                    });
+                 } else {
+                     throw error;
+                 }
+            }
 
-            const result = await Promise.race([saveOperation(), timeoutGuard]) as { partial: boolean };
-
-            // 5. UPDATE PASSWORD (Optional)
+            // Update Password if provided
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 const { error: pwError } = await updatePassword(newPassword);
@@ -223,27 +181,9 @@ const Profile: React.FC = () => {
                 setNewPassword('');
             }
 
-            // 6. FINAL STATUS
-            if (result.partial) {
-                 setStatusMsg({ 
-                     type: 'warning', 
-                     text: "Saved with warnings.", 
-                     detail: "Profile saved, but the database is outdated (missing columns). Please run the Fixer." 
-                 });
-            } else {
-                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
-            }
-
         } catch (error: any) {
             console.error("Save Error:", error);
-            let errorMessage = error.message || 'An unexpected error occurred.';
-            let detail = undefined;
-
-            if (errorMessage.includes('timeout')) {
-                detail = "Check your internet connection.";
-            }
-
-            setStatusMsg({ type: 'error', text: errorMessage, detail });
+            setStatusMsg({ type: 'error', text: error.message || 'An unexpected error occurred.' });
         } finally {
             setSaving(false);
         }
@@ -255,8 +195,7 @@ const Profile: React.FC = () => {
         </div>
     );
     
-    // Fallback if useEffect hasn't redirected yet
-    if (!session) return null;
+    if (!session) return <Navigate to="/login" replace />;
 
     const INPUT_STYLE = "w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all";
     const LABEL_STYLE = "block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2";
@@ -270,7 +209,7 @@ const Profile: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border-4 border-slate-100 dark:border-slate-800 overflow-hidden relative"
             >
-                {/* STATUS BAR (Notification) */}
+                {/* STATUS BAR */}
                 <AnimatePresence>
                     {statusMsg && (
                         <motion.div 
@@ -287,12 +226,10 @@ const Profile: React.FC = () => {
                                 {statusMsg.text}
                             </div>
                             
-                            {/* Detail Message */}
                             {statusMsg.detail && (
                                 <p className="text-xs font-normal opacity-80 max-w-lg mt-1 font-mono bg-white/50 px-2 py-1 rounded">{statusMsg.detail}</p>
                             )}
 
-                            {/* FIX BUTTON - ALWAYS VISIBLE ON ERROR OR WARNING */}
                             {(statusMsg.type === 'error' || statusMsg.type === 'warning') && (
                                 <button 
                                     onClick={() => setShowFixer(true)}
@@ -315,10 +252,10 @@ const Profile: React.FC = () => {
                             <p className="text-slate-500 mt-2 font-medium">Manage your personal information and preferences.</p>
                         </div>
 
-                        {/* SAVE BUTTON - Top Right */}
+                        {/* SAVE BUTTON */}
                         <button 
                             type="button"
-                            onClick={(e) => handleSaveAll(e)}
+                            onClick={handleSaveAll}
                             disabled={saving}
                             className={`
                                 flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 active:scale-95
@@ -389,7 +326,7 @@ const Profile: React.FC = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {/* System Role - Read Only */}
+                                        {/* System Role */}
                                         <div>
                                             <div className="flex items-center gap-2 mb-2">
                                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">System Permission</label>
@@ -407,7 +344,7 @@ const Profile: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        {/* Board Title - Editable */}
+                                        {/* Board Title */}
                                         <div>
                                             <div className="flex items-center gap-2 mb-2">
                                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Board Title (Display)</label>
