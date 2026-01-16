@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
-import { Session, Provider, createClient } from '@supabase/supabase-js';
+import { Session, Provider } from '@supabase/supabase-js';
 
 interface AuthContextType {
   session: Session | null;
@@ -141,8 +141,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           timeoutId = setTimeout(() => {
               console.log("[Auth] Auto-logging out due to inactivity");
               signOut();
-              // Optional: Show alert before redirect
-              // alert("You have been logged out due to inactivity.");
           }, autoLogoutTime);
       };
 
@@ -162,70 +160,75 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       console.log(`[Auth] Checking admin status for ${currentSession.user.email}...`);
       
-      // Create a timeout promise (Increased to 20s for cold starts)
       const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Admin check timed out (20s)')), 20000)
+          setTimeout(() => reject(new Error('Admin check timed out')), 20000)
       );
 
       const checkLogic = async () => {
           let adminStatus = false;
           let debugMsg = '';
 
-          // CRITICAL: Create a scoped client with the specific access token.
-          // FIX: Disable auth persistence to avoid "Multiple GoTrueClient" warnings and storage conflicts.
-          const scopedClient = createClient(finalUrl, finalKey, {
-              global: {
-                  headers: {
-                      Authorization: `Bearer ${currentSession.access_token}`
+          // USE RAW FETCH to avoid creating a secondary SupabaseClient (which can trigger broadcast logout bugs)
+          const headers = {
+              'apikey': finalKey,
+              'Authorization': `Bearer ${currentSession.access_token}`,
+              'Content-Type': 'application/json'
+          };
+
+          // 1. PRIMARY CHECK: Fetch Profile via REST
+          // Equivalent to: .from('profiles').select('role').eq('id', uid).single()
+          try {
+              const profileRes = await fetch(`${finalUrl}/rest/v1/profiles?id=eq.${currentSession.user.id}&select=role`, {
+                  method: 'GET',
+                  headers
+              });
+
+              if (profileRes.ok) {
+                  const rows = await profileRes.json();
+                  if (rows.length > 0) {
+                      const role = (rows[0].role || '').toLowerCase().trim();
+                      debugMsg += `Profile Role: ${role}. `;
+                      if (role === 'admin' || role === 'board') {
+                          adminStatus = true;
+                      }
+                  } else {
+                      debugMsg += `Profile not found. `;
                   }
-              },
-              auth: {
-                  persistSession: false, 
-                  autoRefreshToken: false,
-                  detectSessionInUrl: false,
-                  storageKey: 'memory' // <--- Fix for GoTrue warning
+              } else {
+                  debugMsg += `Profile Fetch Error ${profileRes.status}. `;
               }
-          });
-
-          // 1. PRIMARY CHECK: Check the 'profiles' table directly using the scoped client.
-          const { data: profile, error: profileError } = await scopedClient
-            .from('profiles')
-            .select('role')
-            .eq('id', currentSession.user.id)
-            .single();
-
-          if (profile) {
-              console.log(`[Auth] Profile role found: ${profile.role}`);
-              debugMsg += `Profile Role: ${profile.role}. `;
-              const role = (profile.role || '').toLowerCase().trim();
-              if (role === 'admin' || role === 'board') {
-                  adminStatus = true;
-              }
-          } else if (profileError) {
-              console.warn("[Auth] Profile fetch error:", profileError.message);
-              debugMsg += `Profile Error: ${profileError.message}. `;
-          } else {
-              debugMsg += `Profile not found. `;
+          } catch (err: any) {
+               debugMsg += `Profile Fetch Failed: ${err.message}. `;
           }
 
-          // 2. FALLBACK: Try RPC if profile check was inconclusive or failed
+          // 2. FALLBACK: RPC 'is_admin' via REST
           if (!adminStatus) {
-            const { data: rpcIsAdmin, error: rpcError } = await scopedClient.rpc('is_admin');
-            if (!rpcError && rpcIsAdmin === true) {
-                console.log("[Auth] RPC 'is_admin' returned true");
-                adminStatus = true;
-                debugMsg += `RPC: True. `;
-            } else if (rpcError) {
-                debugMsg += `RPC Error: ${rpcError.message}. `;
-            } else {
-                debugMsg += `RPC: False. `;
+            try {
+                const rpcRes = await fetch(`${finalUrl}/rest/v1/rpc/is_admin`, {
+                    method: 'POST',
+                    headers,
+                    body: '{}'
+                });
+                
+                if (rpcRes.ok) {
+                    const isAdminRpc = await rpcRes.json();
+                    if (isAdminRpc === true) {
+                        adminStatus = true;
+                        debugMsg += `RPC: True. `;
+                    } else {
+                        debugMsg += `RPC: False. `;
+                    }
+                } else {
+                    debugMsg += `RPC Error ${rpcRes.status}. `;
+                }
+            } catch (err: any) {
+                debugMsg += `RPC Failed: ${err.message}. `;
             }
           }
 
           return { adminStatus, debugMsg };
       };
 
-      // Race the check against the timeout
       const result: any = await Promise.race([checkLogic(), timeoutPromise]);
       
       console.log(`[Auth] Final Admin Status: ${result.adminStatus}`);
