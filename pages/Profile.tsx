@@ -138,9 +138,16 @@ const Profile: React.FC = () => {
             }
 
             // 2. ISOLATED CLIENT
+            // FIX: Fully isolate this client to prevent it from broadcasting auth events
+            // that might cause the main app to log out.
             const tempClient = createClient(finalUrl, finalKey, {
                 global: { headers: { Authorization: `Bearer ${session.access_token}` } },
-                auth: { persistSession: false }
+                auth: { 
+                    persistSession: false,
+                    autoRefreshToken: false,
+                    detectSessionInUrl: false,
+                    storageKey: `temp-profile-${Date.now()}` // Unique key ensures no conflict
+                }
             });
 
             // 3. PREPARE DATA
