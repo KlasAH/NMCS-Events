@@ -1,10 +1,11 @@
 
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet, ToggleLeft, ToggleRight, UserPlus, AlertTriangle, Image, List, TestTube, Check, Share, Info, Palette, ImageIcon, Download, Circle, Square, GripVertical, ArrowUpDown, ListOrdered, Camera } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet, ToggleLeft, ToggleRight, UserPlus, AlertTriangle, Image, List, TestTube, Check, Share, Info, Palette, ImageIcon, Download, Circle, Square, GripVertical, ArrowUpDown, ListOrdered, Camera, ShieldAlert, LogOut } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, HotelDetails, ParkingDetails, ItineraryItem, MapConfig, LinkItem } from '../types';
 import { supabase, isDemoMode, finalUrl, finalKey, STORAGE_BUCKET } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -132,7 +133,7 @@ const ItineraryEditorItem: React.FC<ItineraryEditorItemProps> = ({ item, updateI
 
 const AdminDashboard: React.FC = () => {
   // 1. CONTEXT HOOKS
-  const { isAdmin, loading, session, signOut, updatePassword, sendPasswordReset, authStatus, checkAdmin } = useAuth();
+  const { isAdmin, loading, session, signOut, authStatus, checkAdmin } = useAuth();
   const { t } = useLanguage();
   
   // 2. STATE HOOKS
@@ -269,7 +270,29 @@ const AdminDashboard: React.FC = () => {
   // --- EARLY RETURNS ---
   if (loading) return <div className="flex h-screen items-center justify-center"><div className="animate-pulse text-slate-400">Loading...</div></div>;
   if (!session) return <Navigate to="/login" replace />;
-  if (!isAdmin) { return ( <div className="pt-32 text-center">Restricted Access</div> ); }
+  if (!isAdmin) { 
+      return ( 
+        <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950">
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-xl max-w-md w-full text-center border border-slate-100 dark:border-slate-800">
+                <ShieldAlert className="w-16 h-16 text-mini-red mx-auto mb-6" />
+                <h1 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Access Denied</h1>
+                <p className="text-slate-500 mb-6 font-medium">
+                    Your account (<span className="text-slate-900 dark:text-white font-bold">{session.user.email}</span>) does not have administrative privileges.
+                </p>
+                <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-xl mb-6 text-xs text-left font-mono text-slate-500 overflow-x-auto">
+                    <div className="font-bold mb-1 uppercase text-slate-400">Debug Info:</div>
+                    {authStatus}
+                </div>
+                <button 
+                    onClick={() => signOut()}
+                    className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-lg"
+                >
+                    <LogOut size={18} /> Sign Out
+                </button>
+            </div>
+        </div> 
+      ); 
+  }
 
   const handleSaveTransaction = async (e: React.FormEvent) => {
       e.preventDefault();

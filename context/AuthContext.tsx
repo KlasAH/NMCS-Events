@@ -146,9 +146,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const timer = setTimeout(() => setLoading(false), 5000);
 
     try {
-      // Use global client - it should be synced by now or will be shortly.
-      // We rely on RLS anyway.
-      
       let adminStatus = false;
       let debugMsg = '';
 
@@ -161,24 +158,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (profile) {
           const role = (profile.role || '').toLowerCase().trim();
+          debugMsg += `ProfileRole:${role} `;
           if (role === 'admin' || role === 'board') adminStatus = true;
-          debugMsg = `Role: ${role}`;
       } else if (profileError) {
           console.warn("[Auth] Profile fetch error:", profileError);
-          debugMsg = `Error: ${profileError.message}`;
+          debugMsg += `ProfileErr:${profileError.code} `;
+      } else {
+          debugMsg += `Profile:Missing `;
       }
 
-      // 2. Fallback: RPC
+      // 2. Check User Roles Table (Legacy/Fallback)
+      if (!adminStatus) {
+         const { data: userRole } = await supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', currentSession.user.id)
+            .maybeSingle();
+         
+         if (userRole) {
+             const role = (userRole.role || '').toLowerCase().trim();
+             debugMsg += `UserRole:${role} `;
+             if (role === 'admin' || role === 'board') adminStatus = true;
+         }
+      }
+
+      // 3. Fallback: RPC (Database Function)
       if (!adminStatus) {
         const { data: rpcIsAdmin } = await supabase.rpc('is_admin');
         if (rpcIsAdmin === true) {
             adminStatus = true;
-            debugMsg += " (RPC: Yes)";
+            debugMsg += "(RPC:Yes)";
+        } else {
+            debugMsg += "(RPC:No)";
         }
       }
 
       setIsAdmin(adminStatus);
-      setAuthStatus(adminStatus ? 'Access Granted' : `User Access (${debugMsg})`);
+      setAuthStatus(adminStatus ? 'Access Granted' : `Restricted (${debugMsg})`);
+      console.log(`[Auth] Admin Check Complete: ${adminStatus} | ${debugMsg}`);
 
     } catch (e: any) {
       console.error("[Auth] Check admin failed:", e);
