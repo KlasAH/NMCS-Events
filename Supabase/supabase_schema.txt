@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   role TEXT CHECK (role IN ('admin', 'board', 'user')) DEFAULT 'user',
   car_model TEXT DEFAULT 'r53',
   board_role TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 -- Ensure columns exist (Migration safety)
@@ -27,6 +28,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS car_model TEXT DEFAULT 'r53';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS board_role TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- 3. CONNECTION TESTS (Diagnostics)
@@ -50,11 +52,14 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   cover_image_url TEXT,
   pdf_url TEXT, 
   is_pinned BOOLEAN DEFAULT false,
+  status TEXT DEFAULT 'draft',
   maps_config JSONB DEFAULT '[]'::jsonb,
   hotel_info JSONB DEFAULT '{}'::jsonb,
   parking_info JSONB DEFAULT '{}'::jsonb,
   custom_data JSONB DEFAULT '{}'::jsonb,
-  extra_info JSONB DEFAULT '[]'::jsonb
+  extra_info JSONB DEFAULT '[]'::jsonb,
+  gallery_images TEXT[] DEFAULT '{}',
+  google_photos_url TEXT
 );
 ALTER TABLE public.meetings ENABLE ROW LEVEL SECURITY;
 
@@ -110,12 +115,20 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
 );
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
--- 9. STORAGE BUCKET
+-- 9. APP SETTINGS
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+
+-- 10. STORAGE BUCKET
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('nmcs-assets', 'nmcs-assets', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
--- 10. ADMIN FUNCTION (SECURED)
+-- 11. ADMIN FUNCTION (SECURED)
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN 
 LANGUAGE plpgsql 
@@ -130,7 +143,7 @@ BEGIN
 END;
 $$;
 
--- 11. POLICIES (Drop first to allow re-running script safely)
+-- 12. POLICIES (Drop first to allow re-running script safely)
 
 -- Profiles
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
@@ -195,6 +208,13 @@ DROP POLICY IF EXISTS "Admins can manage roles" ON public.user_roles;
 CREATE POLICY "Users can read own role" ON public.user_roles FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Admins can manage roles" ON public.user_roles FOR ALL USING (is_admin());
 
+-- App Settings
+DROP POLICY IF EXISTS "Public settings read" ON public.app_settings;
+DROP POLICY IF EXISTS "Admin settings write" ON public.app_settings;
+
+CREATE POLICY "Public settings read" ON public.app_settings FOR SELECT USING (true);
+CREATE POLICY "Admin settings write" ON public.app_settings FOR ALL USING (is_admin());
+
 -- Storage
 DROP POLICY IF EXISTS "Public Access" ON storage.objects;
 DROP POLICY IF EXISTS "Auth Upload" ON storage.objects;
@@ -206,7 +226,7 @@ CREATE POLICY "Auth Upload" ON storage.objects FOR INSERT WITH CHECK ( bucket_id
 CREATE POLICY "Auth Update" ON storage.objects FOR UPDATE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 CREATE POLICY "Auth Delete" ON storage.objects FOR DELETE USING ( bucket_id = 'nmcs-assets' AND auth.role() = 'authenticated' );
 
--- 12. TRIGGER: HANDLE NEW USER (SECURED)
+-- 13. TRIGGER: HANDLE NEW USER (SECURED)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER 
 LANGUAGE plpgsql 
@@ -242,7 +262,7 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
--- 13. PERFORMANCE INDEXES (Fix Unindexed Foreign Keys)
+-- 14. PERFORMANCE INDEXES (Fix Unindexed Foreign Keys)
 CREATE INDEX IF NOT EXISTS idx_itinerary_meeting_id ON public.itinerary_items(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_meeting_id ON public.registrations(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_registrations_user_id ON public.registrations(user_id);

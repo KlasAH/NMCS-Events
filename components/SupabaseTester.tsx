@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- Connection Tests (Diagnostics)
@@ -199,7 +201,7 @@ type DiagnosticStep = {
 };
 
 // TIMEOUT HELPER to prevent getting stuck
-async function withTimeout<T>(promise: PromiseLike<T>, ms = 8000): Promise<T> {
+async function withTimeout(promise: any, ms = 8000): Promise<any> {
     let timer: any;
     const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`Timeout (${ms}ms)`)), ms);
