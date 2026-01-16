@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isDemoMode } from '../lib/supabase';
+import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -57,21 +58,25 @@ const Profile: React.FC = () => {
 
         const fetchProfile = async () => {
             try {
-                // Fetch profile and user_roles
-                const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-                
-                if (error && error.code !== 'PGRST116') {
-                    console.error('Error fetching profile:', error);
-                }
+                // Fetch profile and user_roles in parallel for robustness
+                const [profileReq, roleReq] = await Promise.all([
+                    supabase.from('profiles').select('*').eq('id', session.user.id).single(),
+                    supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle()
+                ]);
 
-                const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', session.user.id).maybeSingle();
+                const profile = profileReq.data;
+                const roleData = roleReq.data;
 
+                // Determine System Role Logic
+                // Priority: User Roles Table > Profile Table > Metadata > Default 'user'
                 let finalRole = 'user';
+                
                 if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
                     finalRole = roleData.role;
                 } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
                     finalRole = profile.role;
                 } else {
+                     // Last resort: Check auth metadata
                      const metaRole = session.user.user_metadata?.role;
                      if (metaRole) finalRole = metaRole;
                 }
@@ -89,7 +94,7 @@ const Profile: React.FC = () => {
                         setModel(profile.car_model as MiniModel);
                     }
                 } else {
-                    // Pre-fill from auth metadata if profile missing
+                    // Fallback if no profile exists yet
                     setFormData({
                         full_name: session.user.user_metadata?.full_name || '',
                         username: session.user.user_metadata?.username || '',
@@ -113,12 +118,16 @@ const Profile: React.FC = () => {
         if (statusMsg) setStatusMsg(null);
     };
 
-    const handleSaveAll = async (e?: React.FormEvent) => {
-        if (e) e.preventDefault();
+    const handleSaveAll = async () => {
         if (!session?.user?.id) return;
 
         setSaving(true);
         setStatusMsg(null);
+        
+        // 1. TIMEOUT GUARD
+        const timeoutGuard = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Connection timeout. Server took too long to respond.")), 10000)
+        );
 
         try {
             if (isDemoMode) {
@@ -128,10 +137,13 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // SAFETY: Ensure session is valid before writing to DB
-            const { error: refreshError } = await supabase.auth.getSession();
-            if (refreshError) throw new Error("Session expired. Please log in again.");
+            // 2. ISOLATED CLIENT
+            const tempClient = createClient(finalUrl, finalKey, {
+                global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+                auth: { persistSession: false }
+            });
 
+            // 3. PREPARE DATA
             const updates: any = {
                 id: session.user.id,
                 full_name: formData.full_name,
@@ -139,41 +151,45 @@ const Profile: React.FC = () => {
                 email: formData.email, 
                 car_model: model,
                 updated_at: new Date().toISOString(),
+                // Optimistically include board_role. We handle failure below.
                 ...(formData.board_role ? { board_role: formData.board_role } : {})
             };
 
-            const performSave = async (data: any) => {
-                const { error } = await supabase.from('profiles').upsert(data);
-                if (error) throw error;
+            // 4. ATTEMPT SAVE (RACED AGAINST TIMEOUT)
+            const saveOperation = async () => {
+                const { error } = await tempClient.from('profiles').upsert(updates);
+                
+                if (error) {
+                    // DETECT SCHEMA MISMATCH (Missing columns like 'updated_at' or 'board_role')
+                    // Postgres error 42703 = undefined_column
+                    if (error.code === '42703') {
+                        console.warn("[Profile] Schema mismatch (Missing Column). Retrying with minimal fields.");
+                        
+                        // Retry with ABSOLUTE MINIMUM (No updated_at, No board_role)
+                        const minimalUpdates = {
+                            id: session.user.id,
+                            full_name: formData.full_name,
+                            username: formData.username,
+                            email: formData.email,
+                            car_model: model
+                        };
+                        
+                        const { error: retryError } = await tempClient.from('profiles').upsert(minimalUpdates);
+                        
+                        if (retryError) throw retryError;
+                        
+                        // Return a special flag indicating partial success
+                        return { partial: true };
+                    }
+                    throw error;
+                }
+                return { partial: false };
             };
 
-            // Attempt save with failover for missing columns (Schema drift protection)
-            try {
-                await performSave(updates);
-                setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
-            } catch (error: any) {
-                 // Check for "Undefined Column" (Postgres 42703)
-                 if (error.code === '42703') {
-                     console.warn("Schema mismatch. Retrying with minimal fields.");
-                     const minimalUpdates = {
-                        id: session.user.id,
-                        full_name: formData.full_name,
-                        username: formData.username,
-                        email: formData.email,
-                        car_model: model
-                     };
-                     await performSave(minimalUpdates);
-                     setStatusMsg({ 
-                        type: 'warning', 
-                        text: "Saved with warnings.", 
-                        detail: "Profile saved, but the database is missing some columns (e.g. board_role). Use the Fixer." 
-                    });
-                 } else {
-                     throw error;
-                 }
-            }
+            // Run the race
+            const result = await Promise.race([saveOperation(), timeoutGuard]) as { partial: boolean };
 
-            // Update Password if provided
+            // 5. UPDATE PASSWORD (Optional)
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 const { error: pwError } = await updatePassword(newPassword);
@@ -181,9 +197,27 @@ const Profile: React.FC = () => {
                 setNewPassword('');
             }
 
+            // 6. FINAL STATUS
+            if (result.partial) {
+                 setStatusMsg({ 
+                     type: 'warning', 
+                     text: "Saved with warnings.", 
+                     detail: "Profile saved, but the database is outdated (missing columns). Please run the Fixer." 
+                 });
+            } else {
+                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+            }
+
         } catch (error: any) {
             console.error("Save Error:", error);
-            setStatusMsg({ type: 'error', text: error.message || 'An unexpected error occurred.' });
+            let errorMessage = error.message || 'An unexpected error occurred.';
+            let detail = undefined;
+
+            if (errorMessage.includes('timeout')) {
+                detail = "Check your internet connection.";
+            }
+
+            setStatusMsg({ type: 'error', text: errorMessage, detail });
         } finally {
             setSaving(false);
         }
@@ -209,7 +243,7 @@ const Profile: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border-4 border-slate-100 dark:border-slate-800 overflow-hidden relative"
             >
-                {/* STATUS BAR */}
+                {/* STATUS BAR (Notification) */}
                 <AnimatePresence>
                     {statusMsg && (
                         <motion.div 
@@ -226,10 +260,12 @@ const Profile: React.FC = () => {
                                 {statusMsg.text}
                             </div>
                             
+                            {/* Detail Message */}
                             {statusMsg.detail && (
                                 <p className="text-xs font-normal opacity-80 max-w-lg mt-1 font-mono bg-white/50 px-2 py-1 rounded">{statusMsg.detail}</p>
                             )}
 
+                            {/* FIX BUTTON - ALWAYS VISIBLE ON ERROR OR WARNING */}
                             {(statusMsg.type === 'error' || statusMsg.type === 'warning') && (
                                 <button 
                                     onClick={() => setShowFixer(true)}
@@ -252,7 +288,7 @@ const Profile: React.FC = () => {
                             <p className="text-slate-500 mt-2 font-medium">Manage your personal information and preferences.</p>
                         </div>
 
-                        {/* SAVE BUTTON */}
+                        {/* SAVE BUTTON - Top Right */}
                         <button 
                             type="button"
                             onClick={handleSaveAll}
@@ -326,7 +362,7 @@ const Profile: React.FC = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        {/* System Role */}
+                                        {/* System Role - Read Only */}
                                         <div>
                                             <div className="flex items-center gap-2 mb-2">
                                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">System Permission</label>
@@ -344,7 +380,7 @@ const Profile: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        {/* Board Title */}
+                                        {/* Board Title - Editable */}
                                         <div>
                                             <div className="flex items-center gap-2 mb-2">
                                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Board Title (Display)</label>

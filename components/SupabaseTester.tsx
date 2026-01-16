@@ -199,7 +199,7 @@ type DiagnosticStep = {
 };
 
 // TIMEOUT HELPER to prevent getting stuck
-async function withTimeout(promise: any, ms = 8000): Promise<any> {
+async function withTimeout<T>(promise: PromiseLike<T>, ms = 8000): Promise<T> {
     let timer: any;
     const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`Timeout (${ms}ms)`)), ms);
