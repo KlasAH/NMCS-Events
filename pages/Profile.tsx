@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Mail, Shield, CheckCircle, Save, Lock, AlertCircle, Wrench, HelpCircle, Loader2, AtSign } from 'lucide-react';
+import { User, Mail, Shield, CheckCircle, Save, Lock, AlertCircle, Wrench, HelpCircle, Loader2, AtSign, RefreshCw, Database } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import SupabaseTester from '../components/SupabaseTester';
@@ -41,6 +41,7 @@ const Profile: React.FC = () => {
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'warning' | 'error', text: string, detail?: string } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
     const [newPassword, setNewPassword] = useState('');
+    const [debugInfo, setDebugInfo] = useState<string>('');
 
     // SAFETY: If loading takes too long, force it to stop
     useEffect(() => {
@@ -48,10 +49,91 @@ const Profile: React.FC = () => {
             if (loadingData) {
                 console.warn("Profile data load timed out");
                 setLoadingData(false);
+                setDebugInfo(prev => prev + " [Timeout]");
             }
         }, 6000);
         return () => clearTimeout(timer);
     }, [loadingData]);
+
+    const fetchProfile = async () => {
+        if (!userId) return;
+        
+        setLoadingData(true);
+        setDebugInfo('');
+        
+        try {
+            // 1. Fetch Profile
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .maybeSingle();
+
+            if (profileError) {
+                setDebugInfo(`Profile Fetch Error: ${profileError.message} (${profileError.code})`);
+                console.error("Profile fetch error:", profileError);
+            } else if (!profile) {
+                setDebugInfo("Profile: No row found in database for this ID.");
+            } else {
+                setDebugInfo(`Profile: Found row. Role: ${profile.role}`);
+            }
+
+            // 2. Fetch User Role (Legacy)
+            const { data: roleData, error: roleError } = await supabase
+                .from('user_roles')
+                .select('role')
+                .eq('user_id', userId)
+                .maybeSingle();
+
+            // Determine System Role Logic
+            let finalRole = 'user';
+            
+            if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
+                finalRole = roleData.role;
+            } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
+                finalRole = profile.role;
+            } else {
+                 const metaRole = session?.user?.user_metadata?.role;
+                 if (metaRole) finalRole = metaRole;
+            }
+
+            if (profile) {
+                setFormData({
+                    full_name: profile.full_name || session?.user?.user_metadata?.full_name || '',
+                    username: profile.username || session?.user?.user_metadata?.username || '',
+                    email: profile.email || session?.user?.email || '',
+                    board_role: profile.board_role || '', 
+                    system_role: finalRole
+                });
+                
+                // Only update model if different and valid
+                if (profile.car_model && MODELS.some(m => m.id === profile.car_model)) {
+                    if (model !== profile.car_model) {
+                        setModel(profile.car_model as MiniModel);
+                    }
+                }
+            } else {
+                // Fallback to Session Data
+                setFormData({
+                    full_name: session?.user?.user_metadata?.full_name || '',
+                    username: session?.user?.user_metadata?.username || '',
+                    email: session?.user?.email || '',
+                    board_role: '',
+                    system_role: finalRole
+                });
+                setStatusMsg({ 
+                    type: 'warning', 
+                    text: 'Profile not found.', 
+                    detail: 'We loaded your basic info from login, but database data is missing.' 
+                });
+            }
+        } catch (err: any) {
+            console.error("Critical Profile Error:", err);
+            setDebugInfo(`Critical: ${err.message}`);
+        } finally {
+            setLoadingData(false);
+        }
+    };
 
     useEffect(() => {
         if (!userId) {
@@ -71,73 +153,12 @@ const Profile: React.FC = () => {
             return;
         }
 
-        let isMounted = true;
-        
-        const fetchProfile = async () => {
-            setLoadingData(true);
-            try {
-                // Fetch profile and user_roles in parallel
-                const [profileReq, roleReq] = await Promise.all([
-                    supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
-                    supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle()
-                ]);
-
-                if (!isMounted) return;
-
-                const profile = profileReq.data;
-                const roleData = roleReq.data;
-
-                // Determine System Role Logic
-                let finalRole = 'user';
-                
-                if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
-                    finalRole = roleData.role;
-                } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
-                    finalRole = profile.role;
-                } else {
-                     const metaRole = session?.user?.user_metadata?.role;
-                     if (metaRole) finalRole = metaRole;
-                }
-
-                if (profile) {
-                    setFormData({
-                        full_name: profile.full_name || session?.user?.user_metadata?.full_name || '',
-                        username: profile.username || session?.user?.user_metadata?.username || '',
-                        email: profile.email || session?.user?.email || '',
-                        board_role: profile.board_role || '', 
-                        system_role: finalRole
-                    });
-                    
-                    // Only update model if different
-                    if (profile.car_model && MODELS.some(m => m.id === profile.car_model)) {
-                        if (model !== profile.car_model) {
-                            setModel(profile.car_model as MiniModel);
-                        }
-                    }
-                } else {
-                    setFormData({
-                        full_name: session?.user?.user_metadata?.full_name || '',
-                        username: session?.user?.user_metadata?.username || '',
-                        email: session?.user?.email || '',
-                        board_role: '',
-                        system_role: finalRole
-                    });
-                }
-            } catch (err) {
-                console.error("Profile fetch error:", err);
-            } finally {
-                if (isMounted) setLoadingData(false);
-            }
-        };
-
         fetchProfile();
-        
-        return () => { isMounted = false; };
     }, [userId]);
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
-        if (statusMsg) setStatusMsg(null);
+        if (statusMsg?.type !== 'warning') setStatusMsg(null);
     };
 
     const handleSaveAll = async () => {
@@ -190,6 +211,7 @@ const Profile: React.FC = () => {
                 }
             } else {
                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+                fetchProfile(); // Refresh data to confirm save
             }
 
             if (newPassword) {
@@ -207,7 +229,7 @@ const Profile: React.FC = () => {
         }
     };
 
-    if (loading || (loadingData && session)) return (
+    if (loading) return (
         <div className="min-h-screen flex items-center justify-center">
             <Loader2 className="animate-spin text-mini-red" size={48} />
         </div>
@@ -222,6 +244,17 @@ const Profile: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-xl border-4 border-slate-100 dark:border-slate-800 overflow-hidden relative"
             >
+                {/* Debug Bar for Owner */}
+                <div className="bg-slate-100 dark:bg-slate-950 px-6 py-2 text-[10px] font-mono text-slate-400 flex justify-between items-center border-b border-slate-200 dark:border-slate-800">
+                    <div>
+                        <span className="font-bold">ID:</span> {userId}
+                        {debugInfo && <span className="ml-2 text-yellow-600 dark:text-yellow-500">| {debugInfo}</span>}
+                    </div>
+                    <button onClick={fetchProfile} className="flex items-center gap-1 hover:text-mini-red">
+                        <RefreshCw size={10} /> Refresh Data
+                    </button>
+                </div>
+
                 <AnimatePresence>
                     {statusMsg && (
                         <motion.div 
@@ -247,7 +280,13 @@ const Profile: React.FC = () => {
                     )}
                 </AnimatePresence>
 
-                <div className="p-8 md:p-12">
+                <div className="p-8 md:p-12 relative">
+                    {loadingData && (
+                        <div className="absolute inset-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                            <Loader2 className="animate-spin text-mini-red" size={32} />
+                        </div>
+                    )}
+
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10 pb-8 border-b border-slate-100 dark:border-slate-800">
                         <div>
                             <h1 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3">
@@ -255,14 +294,23 @@ const Profile: React.FC = () => {
                             </h1>
                             <p className="text-slate-500 mt-2 font-medium">Manage your personal information.</p>
                         </div>
-                        <button 
-                            type="button"
-                            onClick={handleSaveAll}
-                            disabled={saving}
-                            className={`flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 active:scale-95 ${saving ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-mini-black dark:bg-white text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200'}`}
-                        >
-                            {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20} />} {t('save')}
-                        </button>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => setShowFixer(true)}
+                                className="flex items-center gap-2 px-4 py-4 rounded-2xl font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
+                                title="Run Diagnostics"
+                            >
+                                <Database size={20} />
+                            </button>
+                            <button 
+                                type="button"
+                                onClick={handleSaveAll}
+                                disabled={saving}
+                                className={`flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 active:scale-95 ${saving ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-mini-black dark:bg-white text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200'}`}
+                            >
+                                {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20} />} {t('save')}
+                            </button>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
