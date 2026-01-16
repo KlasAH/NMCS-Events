@@ -79,36 +79,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Initial Session Check with Timeout Safeguard
-    // If local storage is corrupted, getSession() can hang indefinitely.
-    const initSession = async () => {
-        try {
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Auth Init Timeout')), 5000)
-            );
-
-            const { data } = await Promise.race([
-                supabase.auth.getSession(),
-                timeoutPromise
-            ]) as any;
-
-            setSession(data.session);
-            if (data.session) {
-                checkAdmin(data.session);
-            } else {
-                setLoading(false);
-                setAuthStatus('No Session');
-            }
-        } catch (error) {
-            console.warn("[Auth] Session check failed or timed out. Clearing session state to unblock UI.", error);
-            // Fallback: Assume public user if auth fails to initialize
-            setSession(null);
-            setLoading(false);
-            setAuthStatus('Auth Timeout (Public Fallback)');
-        }
-    };
-
-    initSession();
+    // Initial Session Check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) {
+        checkAdmin(session);
+      } else {
+        setLoading(false);
+        setAuthStatus('No Session');
+      }
+    });
 
     // Listen for Auth Changes
     const {
