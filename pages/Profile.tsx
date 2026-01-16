@@ -1,6 +1,6 @@
 
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -25,7 +25,6 @@ const Profile: React.FC = () => {
     const { model, setModel } = useTheme();
     const { t } = useLanguage();
     
-    // Safety check to prevent infinite loops if session flips rapidly
     const userId = session?.user?.id;
 
     // Form State
@@ -41,22 +40,34 @@ const Profile: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'warning' | 'error', text: string, detail?: string } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
-
-    // Password State
     const [newPassword, setNewPassword] = useState('');
 
+    // SAFETY: If loading takes too long, force it to stop
     useEffect(() => {
-        if (!userId || isDemoMode) {
-            setLoadingData(false);
-            if(isDemoMode && session) {
-                setFormData({
-                    full_name: 'Demo User',
-                    username: '@demo',
-                    email: 'demo@example.com',
-                    board_role: 'Ordförande',
-                    system_role: 'admin'
-                });
+        const timer = setTimeout(() => {
+            if (loadingData) {
+                console.warn("Profile data load timed out");
+                setLoadingData(false);
             }
+        }, 6000);
+        return () => clearTimeout(timer);
+    }, [loadingData]);
+
+    useEffect(() => {
+        if (!userId) {
+            setLoadingData(false);
+            return;
+        }
+        
+        if (isDemoMode) {
+            setLoadingData(false);
+            setFormData({
+                full_name: 'Demo User',
+                username: '@demo',
+                email: 'demo@example.com',
+                board_role: 'Ordförande',
+                system_role: 'admin'
+            });
             return;
         }
 
@@ -97,7 +108,7 @@ const Profile: React.FC = () => {
                         system_role: finalRole
                     });
                     
-                    // Critical Fix: Only call setModel if it actually changes, preventing context re-render loops
+                    // Only update model if different
                     if (profile.car_model && MODELS.some(m => m.id === profile.car_model)) {
                         if (model !== profile.car_model) {
                             setModel(profile.car_model as MiniModel);
@@ -122,7 +133,7 @@ const Profile: React.FC = () => {
         fetchProfile();
         
         return () => { isMounted = false; };
-    }, [userId]); // Dependency on userId string instead of session object
+    }, [userId]);
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -135,10 +146,6 @@ const Profile: React.FC = () => {
         setSaving(true);
         setStatusMsg(null);
         
-        const timeoutGuard = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Connection timeout. Server took too long to respond.")), 10000)
-        );
-
         try {
             if (isDemoMode) {
                 await new Promise(resolve => setTimeout(resolve, 800));
@@ -147,6 +154,7 @@ const Profile: React.FC = () => {
                 return;
             }
 
+            // Use temporary non-persisted client for clean update to avoid session conflicts
             const tempClient = createClient(finalUrl, finalKey, {
                 global: { headers: { Authorization: `Bearer ${session?.access_token}` } },
                 auth: { persistSession: false }
@@ -162,57 +170,38 @@ const Profile: React.FC = () => {
                 ...(formData.board_role ? { board_role: formData.board_role } : {})
             };
 
-            const saveOperation = async () => {
-                const { error } = await tempClient.from('profiles').upsert(updates);
-                
-                if (error) {
-                    if (error.code === '42703') { // Undefined Column
-                        console.warn("[Profile] Schema mismatch. Retrying with minimal fields.");
-                        const minimalUpdates = {
-                            id: userId,
-                            full_name: formData.full_name,
-                            username: formData.username,
-                            email: formData.email,
-                            car_model: model
-                        };
-                        const { error: retryError } = await tempClient.from('profiles').upsert(minimalUpdates);
-                        if (retryError) throw retryError;
-                        return { partial: true };
-                    }
+            const { error } = await tempClient.from('profiles').upsert(updates);
+            
+            if (error) {
+                // If column missing, try minimal update
+                if (error.code === '42703') { 
+                    const minimalUpdates = {
+                        id: userId,
+                        full_name: formData.full_name,
+                        username: formData.username,
+                        email: formData.email,
+                        car_model: model
+                    };
+                    const { error: retryError } = await tempClient.from('profiles').upsert(minimalUpdates);
+                    if (retryError) throw retryError;
+                    setStatusMsg({ type: 'warning', text: "Saved partially.", detail: "Database schema outdated. Please run Fixer." });
+                } else {
                     throw error;
                 }
-                return { partial: false };
-            };
-
-            const result = await Promise.race([saveOperation(), timeoutGuard]) as { partial: boolean };
+            } else {
+                setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
+            }
 
             if (newPassword) {
-                if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
+                if (newPassword.length < 6) throw new Error('Password too short.');
                 const { error: pwError } = await updatePassword(newPassword);
                 if (pwError) throw new Error('Password update failed: ' + pwError.message);
                 setNewPassword('');
             }
 
-            if (result.partial) {
-                 setStatusMsg({ 
-                     type: 'warning', 
-                     text: "Saved with warnings.", 
-                     detail: "Profile saved, but the database is outdated (missing columns). Please run the Fixer." 
-                 });
-            } else {
-                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
-            }
-
         } catch (error: any) {
             console.error("Save Error:", error);
-            let errorMessage = error.message || 'An unexpected error occurred.';
-            let detail = undefined;
-
-            if (errorMessage.includes('timeout')) {
-                detail = "Check your internet connection.";
-            }
-
-            setStatusMsg({ type: 'error', text: errorMessage, detail });
+            setStatusMsg({ type: 'error', text: error.message || 'Save failed.' });
         } finally {
             setSaving(false);
         }
@@ -248,15 +237,10 @@ const Profile: React.FC = () => {
                                 {statusMsg.type === 'success' ? <CheckCircle size={18}/> : <AlertCircle size={18}/>}
                                 {statusMsg.text}
                             </div>
-                            {statusMsg.detail && (
-                                <p className="text-xs font-normal opacity-80 max-w-lg mt-1 font-mono bg-white/50 px-2 py-1 rounded">{statusMsg.detail}</p>
-                            )}
+                            {statusMsg.detail && <p className="text-xs font-normal opacity-80">{statusMsg.detail}</p>}
                             {(statusMsg.type === 'error' || statusMsg.type === 'warning') && (
-                                <button 
-                                    onClick={() => setShowFixer(true)}
-                                    className="mt-3 flex items-center gap-2 bg-mini-black dark:bg-white text-white dark:text-black px-6 py-2 rounded-full text-xs hover:opacity-90 shadow-lg border-2 border-transparent transition-all font-bold animate-pulse"
-                                >
-                                    <Wrench size={14} /> Open Database Fixer
+                                <button onClick={() => setShowFixer(true)} className="mt-2 flex items-center gap-2 bg-mini-black dark:bg-white text-white dark:text-black px-4 py-1 rounded-full text-xs">
+                                    <Wrench size={12} /> Fix Database
                                 </button>
                             )}
                         </motion.div>
@@ -269,172 +253,68 @@ const Profile: React.FC = () => {
                             <h1 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3">
                                 <User className="text-mini-red" size={40} /> {t('profile')}
                             </h1>
-                            <p className="text-slate-500 mt-2 font-medium">Manage your personal information and preferences.</p>
+                            <p className="text-slate-500 mt-2 font-medium">Manage your personal information.</p>
                         </div>
                         <button 
                             type="button"
                             onClick={handleSaveAll}
                             disabled={saving}
-                            className={`
-                                flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 active:scale-95
-                                ${saving 
-                                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed' 
-                                    : 'bg-mini-black dark:bg-white text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200 shadow-black/20'}
-                            `}
+                            className={`flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 active:scale-95 ${saving ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-mini-black dark:bg-white text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200'}`}
                         >
-                            {saving ? <><Loader2 className="animate-spin" size={20}/> Saving...</> : <><Save size={20} /> {t('save')}</>}
+                            {saving ? <Loader2 className="animate-spin" size={20}/> : <Save size={20} />} {t('save')}
                         </button>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
                         <div className="lg:col-span-7 space-y-10">
                             <section>
-                                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
-                                    <span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">1</span>
-                                    Personal Details
-                                </h3>
+                                <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">1</span> Personal Details</h3>
                                 <div className="space-y-6">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('fullName')}</label>
-                                            <div className="relative">
-                                                <input 
-                                                    value={formData.full_name}
-                                                    onChange={(e) => handleInputChange('full_name', e.target.value)}
-                                                    className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all"
-                                                    placeholder="Klas Ahlman"
-                                                />
-                                                <User className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                            </div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{t('fullName')}</label>
+                                            <div className="relative"><input value={formData.full_name} onChange={(e) => handleInputChange('full_name', e.target.value)} className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red" /><User className="absolute right-4 top-3 text-slate-400" size={18} /></div>
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('username')}</label>
-                                            <div className="relative">
-                                                <input 
-                                                    value={formData.username}
-                                                    onChange={(e) => handleInputChange('username', e.target.value)}
-                                                    className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all"
-                                                    placeholder="@klas"
-                                                />
-                                                <AtSign className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                            </div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{t('username')}</label>
+                                            <div className="relative"><input value={formData.username} onChange={(e) => handleInputChange('username', e.target.value)} className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red" /><AtSign className="absolute right-4 top-3 text-slate-400" size={18} /></div>
                                         </div>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('email')}</label>
-                                        <div className="relative">
-                                            <input 
-                                                type="email"
-                                                value={formData.email}
-                                                onChange={(e) => handleInputChange('email', e.target.value)}
-                                                className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all"
-                                                placeholder="email@example.com"
-                                            />
-                                            <Mail className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                        </div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{t('email')}</label>
+                                        <div className="relative"><input type="email" value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red" /><Mail className="absolute right-4 top-3 text-slate-400" size={18} /></div>
                                     </div>
-
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div>
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">System Permission</label>
-                                                <div className="group relative">
-                                                    <HelpCircle size={14} className="text-slate-400 cursor-help" />
-                                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                                        Controls what you can access (Admin, User, etc). Stored in 'role' column.
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className={`px-5 py-3 rounded-xl text-slate-600 dark:text-slate-400 font-bold border border-slate-200 dark:border-slate-700 flex items-center gap-2 uppercase text-sm cursor-not-allowed
-                                                ${formData.system_role === 'board' || formData.system_role === 'admin' ? 'bg-mini-red/10 text-mini-red border-mini-red/20' : 'bg-slate-100 dark:bg-slate-800'}
-                                            `}>
-                                                <Shield size={16} /> {formData.system_role}
-                                            </div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">System Permission</label>
+                                            <div className={`px-5 py-3 rounded-xl font-bold border flex items-center gap-2 uppercase text-sm ${formData.system_role === 'board' || formData.system_role === 'admin' ? 'bg-mini-red/10 text-mini-red border-mini-red/20' : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500'}`}><Shield size={16} /> {formData.system_role}</div>
                                         </div>
-
                                         <div>
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Board Title (Display)</label>
-                                            </div>
-                                            <div className="relative">
-                                                <select 
-                                                    value={formData.board_role}
-                                                    onChange={(e) => handleInputChange('board_role', e.target.value)}
-                                                    className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all appearance-none cursor-pointer"
-                                                >
-                                                    <option value="">(None)</option>
-                                                    {BOARD_ROLES.map(role => (
-                                                        <option key={role} value={role}>{role}</option>
-                                                    ))}
-                                                </select>
-                                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                                                </div>
-                                            </div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Board Title</label>
+                                            <select value={formData.board_role} onChange={(e) => handleInputChange('board_role', e.target.value)} className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none focus:ring-2 focus:ring-mini-red appearance-none"><option value="">(None)</option>{BOARD_ROLES.map(r => <option key={r} value={r}>{r}</option>)}</select>
                                         </div>
                                     </div>
                                 </div>
                             </section>
-
-                            <div className="w-full h-px bg-slate-100 dark:bg-slate-800"></div>
-
+                            <div className="h-px bg-slate-100 dark:bg-slate-800"></div>
                             <section>
-                                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
-                                    <span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">2</span>
-                                    {t('changePassword')}
-                                </h3>
+                                <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">2</span> {t('changePassword')}</h3>
                                 <div className="p-6 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('newPassword')}</label>
-                                    <div className="relative">
-                                        <input 
-                                            type="password" 
-                                            value={newPassword}
-                                            onChange={(e) => setNewPassword(e.target.value)}
-                                            placeholder="Enter new password to update"
-                                            minLength={6}
-                                            className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-mini-red transition-all pr-12"
-                                        />
-                                        <Lock className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                    </div>
-                                    <p className="mt-3 text-xs text-slate-400 flex items-start gap-2">
-                                        <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                                        Leave blank if you don't want to change your password. 
-                                        Changes are applied when you click "Save".
-                                    </p>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">{t('newPassword')}</label>
+                                    <div className="relative"><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min 6 characters" className="w-full px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 outline-none focus:ring-2 focus:ring-mini-red" /><Lock className="absolute right-4 top-3 text-slate-400" size={18} /></div>
                                 </div>
                             </section>
                         </div>
-
                         <div className="lg:col-span-5">
                             <section className="h-full">
-                                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
-                                    <span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">3</span>
-                                    {t('carType')}
-                                </h3>
+                                <h3 className="text-xl font-bold mb-6 flex items-center gap-2"><span className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm">3</span> {t('carType')}</h3>
                                 <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-4 border border-slate-100 dark:border-slate-700 max-h-[600px] overflow-y-auto custom-scrollbar">
                                     <div className="grid grid-cols-2 gap-3">
                                         {MODELS.map(m => (
-                                            <button
-                                                key={m.id}
-                                                onClick={() => setModel(m.id)}
-                                                className={`relative p-2 rounded-xl border-2 transition-all group overflow-hidden flex flex-col items-center bg-white dark:bg-slate-900
-                                                    ${model === m.id 
-                                                        ? 'border-mini-red ring-2 ring-mini-red/20 scale-[1.02] shadow-lg z-10' 
-                                                        : 'border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-600 opacity-80 hover:opacity-100'}
-                                                `}
-                                            >
-                                                <div className="aspect-[4/3] w-full flex items-center justify-center mb-2 p-2">
-                                                    <img src={m.carImageUrl} className="w-full h-full object-contain" alt={m.name} loading="lazy" />
-                                                </div>
-                                                <div className="text-center w-full pb-1">
-                                                    <div className="font-bold text-xs text-slate-900 dark:text-white truncate">{m.name}</div>
-                                                    <div className="text-[10px] text-slate-400">{m.years}</div>
-                                                </div>
-                                                {model === m.id && (
-                                                    <div className="absolute top-2 right-2 text-mini-red bg-white rounded-full p-0.5 shadow-sm">
-                                                        <CheckCircle size={16} fill="currentColor" className="text-white" />
-                                                    </div>
-                                                )}
+                                            <button key={m.id} onClick={() => setModel(m.id)} className={`relative p-2 rounded-xl border-2 transition-all flex flex-col items-center bg-white dark:bg-slate-900 ${model === m.id ? 'border-mini-red ring-2 ring-mini-red/20 scale-[1.02] shadow-lg z-10' : 'border-slate-100 dark:border-slate-800 opacity-80 hover:opacity-100'}`}>
+                                                <div className="aspect-[4/3] w-full flex items-center justify-center mb-2 p-2"><img src={m.carImageUrl} className="w-full h-full object-contain" alt={m.name} loading="lazy" /></div>
+                                                <div className="text-center w-full pb-1"><div className="font-bold text-xs truncate">{m.name}</div><div className="text-[10px] text-slate-400">{m.years}</div></div>
+                                                {model === m.id && <div className="absolute top-2 right-2 text-mini-red bg-white rounded-full p-0.5 shadow-sm"><CheckCircle size={16} fill="currentColor" className="text-white" /></div>}
                                             </button>
                                         ))}
                                     </div>
@@ -444,7 +324,6 @@ const Profile: React.FC = () => {
                     </div>
                 </div>
             </motion.div>
-
             <SupabaseTester isOpen={showFixer} onClose={() => setShowFixer(false)} />
         </div>
     );
