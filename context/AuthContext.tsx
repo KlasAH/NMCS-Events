@@ -149,22 +149,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let adminStatus = false;
       let debugMsg = '';
 
-      // 1. Check Profiles Table
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', currentSession.user.id)
-        .maybeSingle();
+      // 0. MASTER OVERRIDE (Hardcoded for safety)
+      if (currentSession.user.email === 'klas.ahlman@gmail.com') {
+          adminStatus = true;
+          debugMsg += "MasterOverride ";
+      }
 
-      if (profile) {
-          const role = (profile.role || '').toLowerCase().trim();
-          debugMsg += `ProfileRole:${role} `;
-          if (role === 'admin' || role === 'board') adminStatus = true;
-      } else if (profileError) {
-          console.warn("[Auth] Profile fetch error:", profileError);
-          debugMsg += `ProfileErr:${profileError.code} `;
-      } else {
-          debugMsg += `Profile:Missing `;
+      // 1. Check Profiles Table (Only if not already confirmed)
+      if (!adminStatus) {
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', currentSession.user.id)
+            .maybeSingle();
+
+          if (profile) {
+              const role = (profile.role || '').toLowerCase().trim();
+              debugMsg += `ProfileRole:${role} `;
+              if (role === 'admin' || role === 'board') adminStatus = true;
+          } else if (profileError) {
+              console.warn("[Auth] Profile fetch error:", profileError);
+              debugMsg += `ProfileErr:${profileError.code} `;
+          } else {
+              debugMsg += `Profile:Missing `;
+          }
       }
 
       // 2. Check User Roles Table (Legacy/Fallback)

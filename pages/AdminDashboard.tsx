@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
-import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet, ToggleLeft, ToggleRight, UserPlus, AlertTriangle, Image, List, TestTube, Check, Share, Info, Palette, ImageIcon, Download, Circle, Square, GripVertical, ArrowUpDown, ListOrdered, Camera, ShieldAlert, LogOut } from 'lucide-react';
+import { Plus, DollarSign, Users, Settings, Star, Save, Search, Edit3, ArrowLeft, Lock, CheckCircle, Mail, UserCog, X, Trash2, RefreshCw, MapPin, Building2, Car, Utensils, Flag, Map, Upload, Clock, Calendar, Link as LinkIcon, Smartphone, ExternalLink, Globe, Eye, QrCode, TrendingUp, TrendingDown, Wallet, ToggleLeft, ToggleRight, UserPlus, AlertTriangle, Image, List, TestTube, Check, Share, Info, Palette, ImageIcon, Download, Circle, Square, GripVertical, ArrowUpDown, ListOrdered, Camera, ShieldAlert, LogOut, Wrench } from 'lucide-react';
 import { Registration, Transaction, Meeting, ExtraInfoSection, HotelDetails, ParkingDetails, ItineraryItem, MapConfig, LinkItem } from '../types';
 import { supabase, isDemoMode, finalUrl, finalKey, STORAGE_BUCKET } from '../lib/supabase';
 import { useLanguage } from '../context/LanguageContext';
@@ -15,6 +15,7 @@ import Modal from '../components/Modal';
 import QRCode from 'react-qr-code';
 import QrCodeStudio from '../components/QrCodeStudio';
 import { compressImage } from '../lib/compression';
+import SupabaseTester from '../components/SupabaseTester';
 
 const MASTER_ADMIN_EMAIL = 'klas.ahlman@gmail.com';
 
@@ -139,6 +140,7 @@ const AdminDashboard: React.FC = () => {
   // 2. STATE HOOKS
   const [activeTab, setActiveTab] = useState<'overview' | 'registrations' | 'finances' | 'settings' | 'qr-tools'>('overview');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [isTesterOpen, setIsTesterOpen] = useState(false);
 
   // Data State
   const [events, setEvents] = useState<Meeting[]>([]);
@@ -283,13 +285,23 @@ const AdminDashboard: React.FC = () => {
                     <div className="font-bold mb-1 uppercase text-slate-400">Debug Info:</div>
                     {authStatus}
                 </div>
-                <button 
-                    onClick={() => signOut()}
-                    className="w-full py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-lg"
-                >
-                    <LogOut size={18} /> Sign Out
-                </button>
+                <div className="flex gap-3">
+                    <button 
+                        onClick={() => signOut()}
+                        className="flex-1 py-3.5 bg-mini-black dark:bg-white text-white dark:text-black rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-lg"
+                    >
+                        <LogOut size={18} /> Sign Out
+                    </button>
+                    <button 
+                        onClick={() => setIsTesterOpen(true)}
+                        className="px-4 py-3.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
+                        title="System Diagnostics"
+                    >
+                        <Wrench size={18} />
+                    </button>
+                </div>
             </div>
+            <SupabaseTester isOpen={isTesterOpen} onClose={() => setIsTesterOpen(false)} />
         </div> 
       ); 
   }
