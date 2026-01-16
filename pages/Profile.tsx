@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
-import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -137,20 +136,10 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // 2. ISOLATED CLIENT
-            // FIX: Fully isolate this client to prevent it from broadcasting auth events
-            // that might cause the main app to log out.
-            const tempClient = createClient(finalUrl, finalKey, {
-                global: { headers: { Authorization: `Bearer ${session.access_token}` } },
-                auth: { 
-                    persistSession: false,
-                    autoRefreshToken: false,
-                    detectSessionInUrl: false,
-                    storageKey: `temp-profile-${Date.now()}` // Unique key ensures no conflict
-                }
-            });
-
-            // 3. PREPARE DATA
+            // 2. RAW FETCH EXECUTION (Bypasses Supabase Client entirely to prevent Auth Broadcast logout bugs)
+            // We use the REST API directly.
+            
+            // Prepare Data
             const updates: any = {
                 id: session.user.id,
                 full_name: formData.full_name,
@@ -162,11 +151,34 @@ const Profile: React.FC = () => {
                 ...(formData.board_role ? { board_role: formData.board_role } : {})
             };
 
-            // 4. ATTEMPT SAVE (RACED AGAINST TIMEOUT)
-            const saveOperation = async () => {
-                const { error } = await tempClient.from('profiles').upsert(updates);
+            const performSave = async (dataToSave: any) => {
+                const response = await fetch(`${finalUrl}/rest/v1/profiles`, {
+                    method: 'POST',
+                    headers: {
+                        'apikey': finalKey,
+                        'Authorization': `Bearer ${session.access_token}`,
+                        'Content-Type': 'application/json',
+                        'Prefer': 'resolution=merge-duplicates' // Upsert behavior
+                    },
+                    body: JSON.stringify(dataToSave)
+                });
+
+                if (!response.ok) {
+                    const errJson = await response.json().catch(() => ({}));
+                    const error = new Error(errJson.message || response.statusText);
+                    // @ts-ignore
+                    error.code = errJson.code;
+                    throw error;
+                }
                 
-                if (error) {
+                return { partial: false };
+            };
+
+            // 3. ATTEMPT SAVE WITH RETRY LOGIC
+            const saveOperation = async () => {
+                try {
+                    return await performSave(updates);
+                } catch (error: any) {
                     // DETECT SCHEMA MISMATCH (Missing columns like 'updated_at' or 'board_role')
                     // Postgres error 42703 = undefined_column
                     if (error.code === '42703') {
@@ -181,22 +193,17 @@ const Profile: React.FC = () => {
                             car_model: model
                         };
                         
-                        const { error: retryError } = await tempClient.from('profiles').upsert(minimalUpdates);
-                        
-                        if (retryError) throw retryError;
-                        
-                        // Return a special flag indicating partial success
+                        await performSave(minimalUpdates);
                         return { partial: true };
                     }
                     throw error;
                 }
-                return { partial: false };
             };
 
             // Run the race
             const result = await Promise.race([saveOperation(), timeoutGuard]) as { partial: boolean };
 
-            // 5. UPDATE PASSWORD (Optional)
+            // 4. UPDATE PASSWORD (Optional) - Uses global client but is standard auth op
             if (newPassword) {
                 if (newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
                 const { error: pwError } = await updatePassword(newPassword);
@@ -204,7 +211,7 @@ const Profile: React.FC = () => {
                 setNewPassword('');
             }
 
-            // 6. FINAL STATUS
+            // 5. FINAL STATUS
             if (result.partial) {
                  setStatusMsg({ 
                      type: 'warning', 
