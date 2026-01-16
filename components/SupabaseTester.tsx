@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
-import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search, Loader2, ClipboardCopy } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search, Loader2, ClipboardCopy, RotateCcw } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
 
@@ -224,9 +225,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
 
     // Manual / Profile Log State
     const [loadingAction, setLoadingAction] = useState<string | null>(null);
-    const [consoleLogs, setConsoleLogs] = useState<{type: 'info'|'error'|'success', msg: string, time: string}[]>([]);
+    const [consoleLogs, setConsoleLogs] = useState<{type: 'info'|'error'|'success'|'warning', msg: string, time: string}[]>([]);
 
-    const log = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
+    const log = (msg: string, type: 'info' | 'error' | 'success' | 'warning' = 'info') => {
         const time = new Date().toLocaleTimeString();
         setConsoleLogs(prev => [{type, msg, time}, ...prev]);
     };
@@ -237,17 +238,25 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         log('Logs copied to clipboard', 'success');
     };
 
+    const hardReset = () => {
+        if(confirm("This will clear all local storage (themes, language, session) and reload the page. Continue?")) {
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.reload();
+        }
+    };
+
     // --- AUTOMATED DIAGNOSTICS ---
     const runDiagnostics = async () => {
         setIsRunning(true);
         setConsoleLogs([]); 
         
         const initialSteps: DiagnosticStep[] = [
-            { id: 'env', label: '1. Config Check (lib/supabase)', status: 'pending' },
+            { id: 'env', label: '1. Config Check', status: 'pending' },
             { id: 'http', label: '2. Raw HTTP Reachability', status: 'pending' },
-            { id: 'client', label: '3. Supabase Client Connect', status: 'pending' },
-            { id: 'table', label: '4. Read Table (connection_tests)', status: 'pending' },
-            { id: 'schema', label: '5. Schema Verification', status: 'pending' },
+            { id: 'client_global', label: '3. Global Client (Stateful)', status: 'pending' },
+            { id: 'client_isolated', label: '4. Isolated Client (Clean)', status: 'pending' },
+            { id: 'table', label: '5. Table Access (DB Check)', status: 'pending' },
         ];
         setSteps(initialSteps);
 
@@ -259,7 +268,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
         try {
             // 1. Env & Config
             updateStep('env', 'running');
-            await new Promise(r => setTimeout(r, 200)); // UI Breath
+            await new Promise(r => setTimeout(r, 200)); 
             
             if (!finalUrl || !finalKey) {
                  updateStep('env', 'error', 'Missing URL/Key');
@@ -287,7 +296,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                 clearTimeout(id);
                 
                 if (res.ok || res.status === 404) {
-                    // 404 is fine for root, means server replied
                     updateStep('http', 'success', `Status: ${res.status}`);
                     log(`Raw HTTP Success: Status ${res.status}`, 'success');
                 } else {
@@ -297,28 +305,68 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             } catch (e: any) {
                 updateStep('http', 'error', e.name === 'AbortError' ? 'Timeout' : 'Network Fail');
                 log(`Raw HTTP Failed: ${e.message}`, 'error');
-                // If raw HTTP fails, client will likely fail too, but we continue to show that
             }
 
-            // 3. Client Connection
-            updateStep('client', 'running');
+            // 3. Global Client Connection
+            // This tests the actual instance used by the app. If it hangs, it might be due to LocalStorage garbage.
+            updateStep('client_global', 'running');
+            let globalClientWorks = false;
             try {
-                // Simple query that doesn't need table access, just system health check logic
-                // Using auth.getSession is a good lightweight check
-                // WRAPPED IN TIMEOUT TO PREVENT HANG
-                const { data, error } = await withTimeout(supabase.auth.getSession(), 5000);
+                // Short timeout for auth check
+                const { error } = await withTimeout(supabase.auth.getSession(), 4000);
                 if (error) throw error;
-                updateStep('client', 'success', 'Session Checked');
-                log('Supabase Client (Auth) Connected OK', 'success');
+                globalClientWorks = true;
+                updateStep('client_global', 'success', 'Connected');
+                log('Global Client: Auth Session Check OK', 'success');
             } catch (e: any) {
-                updateStep('client', 'error', e.message || 'Timeout');
-                log(`Client Connect Failed: ${e.message}`, 'error');
+                updateStep('client_global', 'error', e.message || 'Timeout');
+                log(`Global Client Failed: ${e.message}. This might be due to corrupted local storage.`, 'error');
             }
 
-            // 4. Table Access
+            // 4. Isolated Client Connection
+            // This tests a fresh instance with NO PERSISTENCE. If this works but global fails, it's a browser cache issue.
+            updateStep('client_isolated', 'running');
+            let isolatedClientWorks = false;
+            // Create fresh client
+            const isolatedClient = createClient(finalUrl, finalKey, {
+                auth: {
+                    persistSession: false,
+                    autoRefreshToken: false,
+                    detectSessionInUrl: false
+                }
+            });
+
+            try {
+                // Check connectivity using a lightweight query (Head request on table)
+                const { error } = await withTimeout(
+                    isolatedClient.from('connection_tests').select('count', { count: 'exact', head: true }), 
+                    5000
+                );
+                
+                // Note: Error 'PGRST116' etc is fine, it means we reached DB. Network error is not.
+                if (error && error.message && error.message.includes('fetch')) throw error;
+                
+                isolatedClientWorks = true;
+                updateStep('client_isolated', 'success', 'Connected (Clean)');
+                log('Isolated Client: Connection OK (No Persistence)', 'success');
+            } catch (e: any) {
+                updateStep('client_isolated', 'error', e.message || 'Timeout');
+                log(`Isolated Client Failed: ${e.message}`, 'error');
+            }
+
+            // ANALYSIS
+            if (!globalClientWorks && isolatedClientWorks) {
+                log('CRITICAL: Global client failed but Isolated client worked.', 'warning');
+                log('ROOT CAUSE: Your local browser storage/session is likely corrupted or incompatible.', 'warning');
+                log('SOLUTION: Click "Hard Reset App" below to clear cache.', 'success');
+            }
+
+            // 5. Table Access (Use Isolated Client if available to bypass global issues)
             updateStep('table', 'running');
+            const clientToUse = isolatedClientWorks ? isolatedClient : supabase;
+            
             const { error: tableError } = await withTimeout(
-                supabase.from('connection_tests').select('id').limit(1)
+                clientToUse.from('connection_tests').select('id').limit(1), 8000
             );
             if (tableError) {
                  updateStep('table', 'error', tableError.message, tableError.code);
@@ -326,19 +374,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             } else {
                  updateStep('table', 'success', 'Read OK');
                  log('Table Read Success (connection_tests)', 'success');
-            }
-
-            // 5. Schema
-            updateStep('schema', 'running');
-            const { error: schemaError } = await withTimeout(
-                supabase.from('profiles').select('board_role, updated_at').limit(1)
-            );
-            if (schemaError) {
-                 updateStep('schema', 'error', 'Missing Columns?', schemaError.code);
-                 log(`Schema Check Failed: ${schemaError.message}`, 'error');
-            } else {
-                 updateStep('schema', 'success', 'Columns Exist');
-                 log('Schema Verification Passed', 'success');
             }
 
         } catch (e: any) {
@@ -503,7 +538,12 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                                         {isRunning ? <RefreshCw className="animate-spin"/> : hasError ? <ShieldAlert className="text-red-500"/> : <CheckCircle2 className="text-green-500"/>}
                                         {isRunning ? 'Scanning...' : hasError ? 'Issues Found' : 'Systems Nominal'}
                                     </h3>
-                                    {!isRunning && <button onClick={runDiagnostics} className="text-xs bg-white px-3 py-1 rounded shadow hover:bg-slate-50">Re-run</button>}
+                                    <div className="flex gap-2">
+                                        <button onClick={hardReset} className="text-xs bg-red-100 text-red-700 hover:bg-red-200 px-3 py-1 rounded shadow flex items-center gap-1" title="Clear Cache & Reload">
+                                            <RotateCcw size={12} /> Hard Reset App
+                                        </button>
+                                        {!isRunning && <button onClick={runDiagnostics} className="text-xs bg-white px-3 py-1 rounded shadow hover:bg-slate-50">Re-run</button>}
+                                    </div>
                                 </div>
                                 <div className="space-y-2">
                                     {steps.map(s => (
@@ -602,6 +642,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                                 <div key={i} className={`mb-1 break-all ${
                                     l.type === 'error' ? 'text-red-400' : 
                                     l.type === 'success' ? 'text-green-400' : 
+                                    l.type === 'warning' ? 'text-yellow-400' :
                                     'text-slate-300'
                                 }`}>
                                     <span className="opacity-50 mr-2">[{l.time}]</span>
