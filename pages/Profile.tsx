@@ -1,6 +1,6 @@
 
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -42,44 +42,62 @@ const Profile: React.FC = () => {
     const [showFixer, setShowFixer] = useState(false);
     const [newPassword, setNewPassword] = useState('');
     const [debugInfo, setDebugInfo] = useState<string>('');
+    
+    // Prevent double-fetching in strict mode
+    const fetchInProgress = useRef(false);
 
-    // SAFETY: If loading takes too long, force it to stop
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (loadingData) {
-                console.warn("Profile data load timed out");
-                setLoadingData(false);
-                setDebugInfo(prev => prev + " [Timeout]");
-            }
-        }, 6000);
-        return () => clearTimeout(timer);
-    }, [loadingData]);
-
-    const fetchProfile = async () => {
+    const fetchProfile = async (retryCount = 0) => {
         if (!userId) return;
         
+        // Prevent overlapping fetches if component re-renders quickly
+        if (fetchInProgress.current && retryCount === 0) return;
+        fetchInProgress.current = true;
+
         setLoadingData(true);
-        setDebugInfo('');
-        
+        if (retryCount === 0) setDebugInfo('');
+
+        // Create an AbortController to kill the request if it hangs (fixes the "Stuck Loading" issue)
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 5000); // 5 second hard timeout
+
         try {
-            // 1. Fetch Profile
+            // 1. Fetch Profile with AbortSignal
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('id', userId)
+                .abortSignal(abortController.signal)
                 .maybeSingle();
 
-            if (profileError) {
-                setDebugInfo(`Profile Fetch Error: ${profileError.message} (${profileError.code})`);
-                console.error("Profile fetch error:", profileError);
-            } else if (!profile) {
-                setDebugInfo("Profile: No row found in database for this ID.");
-            } else {
-                setDebugInfo(`Profile: Found row. Role: ${profile.role}`);
+            clearTimeout(timeoutId); // Request finished, clear timeout
+
+            // AUTO-RETRY LOGIC:
+            // If data is missing OR we got a fetch error (likely auth related), try to refresh token once.
+            if ((profileError || !profile) && retryCount < 1) {
+                console.log("[Profile] Data missing or error. Refreshing session and retrying...", profileError);
+                setDebugInfo("Refreshing Session...");
+                
+                const { error: refreshError } = await supabase.auth.refreshSession();
+                if (refreshError) console.warn("Session refresh failed", refreshError);
+                
+                fetchInProgress.current = false; // Allow retry
+                return await fetchProfile(retryCount + 1);
             }
 
-            // 2. Fetch User Role (Legacy)
-            const { data: roleData, error: roleError } = await supabase
+            if (profileError) {
+                if (profileError.message.includes('AbortError')) {
+                    throw new Error("Connection timed out. Database is slow.");
+                }
+                setDebugInfo(`Error: ${profileError.message} (${profileError.code})`);
+                console.error("Profile fetch error:", profileError);
+            } else if (!profile) {
+                setDebugInfo(`Profile: No row found (ID: ${userId}).`);
+            } else {
+                setDebugInfo(`Profile: Loaded (Role: ${profile.role})`);
+            }
+
+            // 2. Fetch User Role (Legacy) - Non-blocking
+            const { data: roleData } = await supabase
                 .from('user_roles')
                 .select('role')
                 .eq('user_id', userId)
@@ -124,14 +142,24 @@ const Profile: React.FC = () => {
                 setStatusMsg({ 
                     type: 'warning', 
                     text: 'Profile not found.', 
-                    detail: 'We loaded your basic info from login, but database data is missing.' 
+                    detail: 'Loaded basic info from login. Database row might be missing.' 
                 });
             }
         } catch (err: any) {
             console.error("Critical Profile Error:", err);
+            
+            // Retry on timeout/network error
+            if (retryCount < 1) {
+                setDebugInfo("Timeout detected. Retrying...");
+                fetchInProgress.current = false;
+                return await fetchProfile(retryCount + 1);
+            }
+            
             setDebugInfo(`Critical: ${err.message}`);
         } finally {
+            clearTimeout(timeoutId);
             setLoadingData(false);
+            fetchInProgress.current = false;
         }
     };
 
@@ -154,7 +182,7 @@ const Profile: React.FC = () => {
         }
 
         fetchProfile();
-    }, [userId]);
+    }, [userId]); // Only re-run if userId changes (login/logout), not on every render
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -211,7 +239,8 @@ const Profile: React.FC = () => {
                 }
             } else {
                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
-                fetchProfile(); // Refresh data to confirm save
+                // Don't full refresh here to avoid UI jump, just update debug info
+                setDebugInfo(`Saved at ${new Date().toLocaleTimeString()}`);
             }
 
             if (newPassword) {
@@ -246,12 +275,12 @@ const Profile: React.FC = () => {
             >
                 {/* Debug Bar for Owner */}
                 <div className="bg-slate-100 dark:bg-slate-950 px-6 py-2 text-[10px] font-mono text-slate-400 flex justify-between items-center border-b border-slate-200 dark:border-slate-800">
-                    <div>
-                        <span className="font-bold">ID:</span> {userId}
-                        {debugInfo && <span className="ml-2 text-yellow-600 dark:text-yellow-500">| {debugInfo}</span>}
+                    <div className="flex gap-2 items-center">
+                        <span className="font-bold">ID:</span> {userId?.substring(0, 8)}...
+                        {debugInfo && <span className="ml-2 text-yellow-600 dark:text-yellow-500 border-l border-slate-300 pl-2"> {debugInfo}</span>}
                     </div>
-                    <button onClick={fetchProfile} className="flex items-center gap-1 hover:text-mini-red">
-                        <RefreshCw size={10} /> Refresh Data
+                    <button onClick={() => fetchProfile(0)} className="flex items-center gap-1 hover:text-mini-red transition-colors">
+                        <RefreshCw size={10} /> Force Refresh
                     </button>
                 </div>
 
