@@ -81,38 +81,66 @@ const Profile: React.FC = () => {
         const signal = abortController.signal;
 
         try {
-            // 1. Fetch Profile
-            const { data: profile, error: profileError } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', userId)
-                .abortSignal(signal)
-                .maybeSingle();
-
-            if (signal.aborted) return; // Stop if unmounted
-
-            // AUTO-RETRY LOGIC (One attempt)
-            if ((profileError || !profile) && !isRetry) {
-                console.log("[Profile] Data missing or error. Refreshing session and retrying...");
-                setDebugInfo("Refreshing Session...");
+            // STRATEGY: Try Global Client -> Fail -> Try Isolated Client
+            // This fixes issues where LocalStorage corruption hangs the global client.
+            
+            let profile = null;
+            let finalRole = 'user';
+            
+            // 1. Attempt Global Fetch
+            try {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .abortSignal(signal)
+                    .maybeSingle();
                 
-                const { error: refreshError } = await supabase.auth.refreshSession();
-                if (refreshError) console.warn("Session refresh failed", refreshError);
+                if (error) throw error;
+                profile = data;
+                setDebugInfo("Loaded via Global Client");
+            } catch (err: any) {
+                console.warn("[Profile] Global client failed, trying isolated client...", err.message);
                 
-                // Recursive retry
-                return fetchProfileData(true);
+                if (signal.aborted) return;
+
+                // 2. Attempt Isolated Fetch (Bypass LocalStorage)
+                // We manually inject the token since this client has no session state
+                const isolatedClient = createClient(finalUrl, finalKey, {
+                    global: { headers: { Authorization: `Bearer ${session?.access_token}` } },
+                    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+                });
+
+                const { data, error } = await isolatedClient
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .abortSignal(signal)
+                    .maybeSingle();
+                
+                if (!error && data) {
+                    profile = data;
+                    setDebugInfo("Loaded via Isolated Client (Storage Bypass)");
+                } else if (error) {
+                    setDebugInfo(`Fetch Error: ${error.message}`);
+                }
             }
 
-            if (profileError) {
-                setDebugInfo(`Fetch Error: ${profileError.message} (${profileError.code})`);
-                console.error("Profile fetch error:", profileError);
-            } else if (!profile) {
-                setDebugInfo(`Profile: No row found (ID: ${userId?.substring(0,6)}...)`);
-            } else {
-                setDebugInfo(`Profile Loaded. Role: ${profile.role}`);
+            if (signal.aborted) return;
+
+            if (!profile) {
+                setDebugInfo(prev => prev + " | Profile missing");
+                // Create a basic skeleton from session if DB row is missing
+                setStatusMsg({ 
+                    type: 'warning', 
+                    text: 'Profile not found.', 
+                    detail: 'Loaded basic info from login. Database row might be missing.' 
+                });
             }
 
-            // 2. Fetch User Role (Legacy check)
+            // 3. Fetch User Role (Legacy check)
+            // We use the same strategy (Global -> Fallback Isolated) implicitly by checking profile first
+            // But for role table, let's just try global and ignore if fails to keep it fast
             const { data: roleData } = await supabase
                 .from('user_roles')
                 .select('role')
@@ -120,7 +148,6 @@ const Profile: React.FC = () => {
                 .maybeSingle();
 
             // Determine System Role
-            let finalRole = 'user';
             if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
                 finalRole = roleData.role;
             } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
@@ -130,6 +157,7 @@ const Profile: React.FC = () => {
                  if (metaRole) finalRole = metaRole;
             }
 
+            // Apply Data to State
             if (profile) {
                 setFormData({
                     full_name: profile.full_name || session?.user?.user_metadata?.full_name || '',
@@ -146,7 +174,7 @@ const Profile: React.FC = () => {
                     }
                 }
             } else {
-                // Fallback
+                // Fallback from Session
                 setFormData({
                     full_name: session?.user?.user_metadata?.full_name || '',
                     username: session?.user?.user_metadata?.username || '',
@@ -154,12 +182,8 @@ const Profile: React.FC = () => {
                     board_role: '',
                     system_role: finalRole
                 });
-                setStatusMsg({ 
-                    type: 'warning', 
-                    text: 'Profile not found.', 
-                    detail: 'Loaded basic info from login. Database row might be missing.' 
-                });
             }
+
         } catch (err: any) {
             if (err.name === 'AbortError') {
                 console.log('Fetch aborted');
@@ -174,7 +198,7 @@ const Profile: React.FC = () => {
         }
         
         return () => abortController.abort();
-    }, [userId, model, session]); // Dependencies
+    }, [userId, model, session]);
 
     // Trigger Fetch on Mount / User Change
     useEffect(() => {
