@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 // @ts-ignore
@@ -889,7 +888,7 @@ const AdminDashboard: React.FC = () => {
                         <div className="space-y-8 animate-in fade-in">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="font-bold text-xl flex items-center gap-2"><Building2 size={20}/> Hotels</h3>
-                                <button onClick={() => addToList('hotel_info', { id: `h-${Date.now()}`, name: '', address: '', map_url: '', price_single: '', price_double: '', description: '', booking_links: [], contact: {name: '', email: '', phone: ''} })} className={`${BUTTON_STYLE} bg-mini-black dark:bg-white text-white dark:text-black`}>+ Add Hotel</button>
+                                <button onClick={() => addToList('hotel_info', { id: `h-${Date.now()}`, name: '', address: '', map_url: '', website_url: '', description: '', booking_links: [], contact: {name: '', email: '', phone: ''} })} className={`${BUTTON_STYLE} bg-mini-black dark:bg-white text-white dark:text-black`}>+ Add Hotel</button>
                             </div>
                             
                             {(editingEventData.hotel_info as HotelDetails[] || []).map((hotel, idx) => (
@@ -912,20 +911,14 @@ const AdminDashboard: React.FC = () => {
                                         <input value={hotel.map_url} onChange={e => updateList('hotel_info', idx, 'map_url', e.target.value)} className={INPUT_STYLE} placeholder="https://maps.google.com..." />
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-4 mb-4">
-                                        <div>
-                                            <label className={LABEL_STYLE}>Price Single</label>
-                                            <input value={hotel.price_single} onChange={e => updateList('hotel_info', idx, 'price_single', e.target.value)} className={INPUT_STYLE} placeholder="e.g. 1500 SEK" />
-                                        </div>
-                                        <div>
-                                            <label className={LABEL_STYLE}>Price Double</label>
-                                            <input value={hotel.price_double} onChange={e => updateList('hotel_info', idx, 'price_double', e.target.value)} className={INPUT_STYLE} placeholder="e.g. 1800 SEK" />
-                                        </div>
+                                    <div className="mb-4">
+                                        <label className={LABEL_STYLE}>Website / Booking URL</label>
+                                        <input value={hotel.website_url || ''} onChange={e => updateList('hotel_info', idx, 'website_url', e.target.value)} className={INPUT_STYLE} placeholder="https://hotel.com..." />
                                     </div>
 
                                     <div className="mb-4">
                                         <label className={LABEL_STYLE}>Description</label>
-                                        <textarea value={hotel.description} onChange={e => updateList('hotel_info', idx, 'description', e.target.value)} className={INPUT_STYLE} rows={3} placeholder="Room details, breakfast info..." />
+                                        <textarea value={hotel.description} onChange={e => updateList('hotel_info', idx, 'description', e.target.value)} className={`${INPUT_STYLE} min-h-[150px] resize-y`} rows={6} placeholder="Room details, breakfast info..." />
                                     </div>
 
                                     <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 mb-4">
@@ -1078,6 +1071,9 @@ const AdminDashboard: React.FC = () => {
                              </div>
                         </div>
                     )}
+                    
+                    {/* ... other sections ... */}
+                    {/* ... REST OF FILE CONTENT (Maps, Track Day, etc) ... */}
                     
                     {editorTab === 'trackday' && (
                         <div className="space-y-8 animate-in fade-in">

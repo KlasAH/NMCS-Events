@@ -1,5 +1,4 @@
 
-
 export type Json =
   | string
   | number
@@ -24,12 +23,11 @@ export interface HotelDetails {
   name: string;
   address: string;
   map_url: string;
-  price_single: string;
-  price_double: string;
+  website_url?: string; // Replaces prices
   description: string;
   booking_links?: LinkItem[];
   image_url?: string;
-  contact?: ContactPerson; // New
+  contact?: ContactPerson; 
 }
 
 export interface ParkingDetails {

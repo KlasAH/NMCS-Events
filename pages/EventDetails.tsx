@@ -7,7 +7,7 @@ import { Meeting, ExtraInfoSection, MapConfig, HotelDetails, ParkingDetails } fr
 import Itinerary from '../components/Itinerary';
 import Modal from '../components/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink, Download, UserPlus, CheckCircle, Mail, User, Phone, MessageSquare, Loader2, Image, Camera } from 'lucide-react';
+import { ArrowLeft, Map, Calendar, FileText, MapPin, Building2, Car, Utensils, Flag, Info, ChevronDown, ChevronRight, ExternalLink, Download, UserPlus, CheckCircle, Mail, User, Phone, MessageSquare, Loader2, Image, Camera, Globe } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { format } from 'date-fns';
 import { useLanguage } from '../context/LanguageContext';
@@ -33,8 +33,7 @@ const mockDetailMeeting: Meeting = {
         name: 'The Dolder Grand',
         address: 'Kurhausstrasse 65, 8032 Zürich, Switzerland',
         map_url: 'https://goo.gl/maps/dolder',
-        price_single: '4500 SEK',
-        price_double: '5500 SEK',
+        website_url: 'https://thedoldergrand.com',
         description: 'Luxury 5-star hotel.',
         image_url: 'https://picsum.photos/seed/hotel/400/300',
         contact: { name: 'Front Desk', phone: '+41 44 456 60 00', email: 'reservations@dolder.ch' }
@@ -525,10 +524,12 @@ const EventDetails: React.FC = () => {
                             )}
                         </div>
                         
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl text-center"><span className="block text-xs text-slate-500 uppercase font-bold">Single</span><span className="block font-bold dark:text-white text-lg">{hotel.price_single}</span></div>
-                            <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl text-center"><span className="block text-xs text-slate-500 uppercase font-bold">Double</span><span className="block font-bold dark:text-white text-lg">{hotel.price_double}</span></div>
-                        </div>
+                        {/* Replaced Prices with Website Link */}
+                        {hotel.website_url && (
+                             <a href={hotel.website_url} target="_blank" rel="noreferrer" className="block w-full text-center px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-900 dark:text-white rounded-xl font-bold hover:bg-slate-50 dark:hover:bg-slate-600 mb-4 transition-colors flex items-center justify-center gap-2">
+                                <Globe size={18} /> Visit Website
+                             </a>
+                        )}
 
                          {/* Contact Info */}
                         {hotel.contact && (
