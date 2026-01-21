@@ -1,5 +1,4 @@
 
-
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { Session, Provider } from '@supabase/supabase-js';
@@ -37,7 +36,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setLoading(false);
               setAuthStatus('Timeout - Loaded anyway');
           }
-      }, 8000); // 8 seconds max load time
+      }, 5000); // Reduced to 5 seconds
       return () => clearTimeout(safetyTimer);
   }, [loading]);
 
@@ -80,18 +79,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // 1. Check Session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) {
-        checkAdmin(session);
-      } else {
-        setLoading(false);
-        setAuthStatus('No Session');
-      }
-    }).catch(err => {
-        console.error("[Auth] Get session error:", err);
-        setLoading(false);
-    });
+    const initSession = async () => {
+        try {
+             // Race condition protection for initial load
+             const { data: { session }, error } = await supabase.auth.getSession();
+             if (error) throw error;
+             
+             setSession(session);
+             if (session) {
+                await checkAdmin(session);
+             } else {
+                setLoading(false);
+                setAuthStatus('No Session');
+             }
+        } catch (err) {
+            console.error("[Auth] Get session error:", err);
+            setLoading(false);
+            setAuthStatus('Session Error');
+        }
+    };
+
+    initSession();
 
     // 2. Listen for Changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -99,7 +107,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (session) {
           if (session.access_token !== lastCheckedToken.current) {
-              if (!isAdmin) setLoading(true); 
+              // Only trigger loading if we need to re-verify admin
+              // Don't set loading=true blindly, it causes flicker or stuck state on navigation
               checkAdmin(session);
           } else {
               setLoading(false);
@@ -139,12 +148,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [session, autoLogoutTime]);
 
   const checkAdmin = async (currentSession: Session) => {
-    setAuthStatus('Checking Permissions...');
-    lastCheckedToken.current = currentSession.access_token;
+    // Prevent redundant checks or loops
+    if (currentSession.access_token === lastCheckedToken.current && isAdmin) {
+        setLoading(false);
+        return;
+    }
     
-    // Safety: If checking takes too long, stop loading
-    const timer = setTimeout(() => setLoading(false), 5000);
-
+    lastCheckedToken.current = currentSession.access_token;
+    // We do NOT set loading=true here to avoid UI blocking on re-checks. 
+    // Admin features will simply appear once verified.
+    
+    setAuthStatus('Checking Permissions...');
+    
     try {
       let adminStatus = false;
       let debugMsg = '';
@@ -157,48 +172,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // 1. Check Profiles Table (Only if not already confirmed)
       if (!adminStatus) {
-          const { data: profile, error: profileError } = await supabase
+          // Use timeout to prevent hanging
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000));
+          const profilePromise = supabase
             .from('profiles')
             .select('role')
             .eq('id', currentSession.user.id)
             .maybeSingle();
 
-          if (profile) {
-              const role = (profile.role || '').toLowerCase().trim();
-              debugMsg += `ProfileRole:${role} `;
-              if (role === 'admin' || role === 'board') adminStatus = true;
-          } else if (profileError) {
-              console.warn("[Auth] Profile fetch error:", profileError);
-              debugMsg += `ProfileErr:${profileError.code} `;
-          } else {
-              debugMsg += `Profile:Missing `;
+          try {
+              const { data: profile, error: profileError } = await Promise.race([profilePromise, timeoutPromise]) as any;
+
+              if (profile) {
+                  const role = (profile.role || '').toLowerCase().trim();
+                  debugMsg += `ProfileRole:${role} `;
+                  if (role === 'admin' || role === 'board') adminStatus = true;
+              } else if (profileError) {
+                  console.warn("[Auth] Profile fetch error:", profileError);
+                  debugMsg += `ProfileErr:${profileError.code} `;
+              } else {
+                  debugMsg += `Profile:Missing `;
+              }
+          } catch(e) {
+              debugMsg += "ProfileTimeout ";
           }
       }
 
       // 2. Check User Roles Table (Legacy/Fallback)
       if (!adminStatus) {
-         const { data: userRole } = await supabase
-            .from('user_roles')
-            .select('role')
-            .eq('user_id', currentSession.user.id)
-            .maybeSingle();
-         
-         if (userRole) {
-             const role = (userRole.role || '').toLowerCase().trim();
-             debugMsg += `UserRole:${role} `;
-             if (role === 'admin' || role === 'board') adminStatus = true;
-         }
-      }
-
-      // 3. Fallback: RPC (Database Function)
-      if (!adminStatus) {
-        const { data: rpcIsAdmin } = await supabase.rpc('is_admin');
-        if (rpcIsAdmin === true) {
-            adminStatus = true;
-            debugMsg += "(RPC:Yes)";
-        } else {
-            debugMsg += "(RPC:No)";
-        }
+         try {
+             const { data: userRole } = await supabase
+                .from('user_roles')
+                .select('role')
+                .eq('user_id', currentSession.user.id)
+                .maybeSingle();
+             
+             if (userRole) {
+                 const role = (userRole.role || '').toLowerCase().trim();
+                 debugMsg += `UserRole:${role} `;
+                 if (role === 'admin' || role === 'board') adminStatus = true;
+             }
+         } catch(e) { /* ignore */ }
       }
 
       setIsAdmin(adminStatus);
@@ -210,7 +224,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAdmin(false);
       setAuthStatus('Permission Check Failed');
     } finally {
-      clearTimeout(timer);
       setLoading(false);
     }
   };

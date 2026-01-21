@@ -19,12 +19,16 @@ const BOARD_ROLES = [
     'Suppleant'
 ];
 
+// Helper for strict timeouts
+const timeoutPromise = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('Request Timed Out')), ms));
+
 const Profile: React.FC = () => {
     const { session, loading, updatePassword } = useAuth();
     const { model, setModel } = useTheme();
     const { t } = useLanguage();
     
     const userId = session?.user?.id;
+    const mountedRef = useRef(true);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -42,70 +46,87 @@ const Profile: React.FC = () => {
     const [newPassword, setNewPassword] = useState('');
     const [debugInfo, setDebugInfo] = useState<string>('');
     
-    // SAFETY: If loading takes too long (>6s), force it to stop. 
-    // This prevents the "stuck in loading" UI if the promise hangs or logic fails.
+    useEffect(() => {
+        return () => { mountedRef.current = false; };
+    }, []);
+
+    // SAFETY: If loading takes too long (>5s), force it to stop. 
     useEffect(() => {
         const timer = setTimeout(() => {
-            if (loadingData) {
+            if (loadingData && mountedRef.current) {
                 console.warn("[Profile] Safety timeout triggered");
                 setLoadingData(false);
                 setDebugInfo(prev => (prev ? prev + " | " : "") + "Forced Load (Timeout)");
             }
-        }, 6000);
+        }, 5000);
         return () => clearTimeout(timer);
     }, [loadingData]);
 
     const fetchProfileData = useCallback(async (isRetry = false) => {
         if (!userId) {
-            setLoadingData(false);
+            if(mountedRef.current) setLoadingData(false);
             return;
         }
 
         if (isDemoMode) {
-            setLoadingData(false);
-            setFormData({
-                full_name: 'Demo User',
-                username: '@demo',
-                email: 'demo@example.com',
-                board_role: 'Ordförande',
-                system_role: 'admin'
-            });
+            if(mountedRef.current) {
+                setLoadingData(false);
+                setFormData({
+                    full_name: 'Demo User',
+                    username: '@demo',
+                    email: 'demo@example.com',
+                    board_role: 'Ordförande',
+                    system_role: 'admin'
+                });
+            }
             return;
         }
 
-        setLoadingData(true);
-        if(!isRetry) setDebugInfo('');
+        if(mountedRef.current) {
+            setLoadingData(true);
+            if(!isRetry) setDebugInfo('');
+        }
 
-        // Use AbortController for this specific request
         const abortController = new AbortController();
         const signal = abortController.signal;
 
         try {
-            // STRATEGY: Try Global Client -> Fail -> Try Isolated Client
-            // This fixes issues where LocalStorage corruption hangs the global client.
+            // STRATEGY: Race the Global Client against a 2-second timeout.
+            // If it hangs (due to local storage issues), we fail fast and use the Isolated Client.
             
             let profile = null;
-            let finalRole = 'user';
+            let usedIsolated = false;
             
-            // 1. Attempt Global Fetch
+            // 1. Attempt Global Fetch with Strict Timeout
             try {
-                const { data, error } = await supabase
+                // If global client is already suspected bad (from previous error), skip it
+                if (window.sessionStorage.getItem('nmcs_global_client_bad')) throw new Error("Skipping Global Client (Marked Bad)");
+
+                const fetchPromise = supabase
                     .from('profiles')
                     .select('*')
                     .eq('id', userId)
                     .abortSignal(signal)
                     .maybeSingle();
                 
+                // RACE: 2000ms limit
+                const { data, error } = await Promise.race([
+                    fetchPromise,
+                    timeoutPromise(2000)
+                ]) as any;
+                
                 if (error) throw error;
                 profile = data;
-                setDebugInfo("Loaded via Global Client");
+                if(mountedRef.current) setDebugInfo("Loaded via Global Client");
             } catch (err: any) {
-                console.warn("[Profile] Global client failed, trying isolated client...", err.message);
-                
                 if (signal.aborted) return;
+                console.warn("[Profile] Global client failed/timed out, switching to isolated...", err.message);
+                
+                // Mark global as bad for this session to speed up future requests
+                window.sessionStorage.setItem('nmcs_global_client_bad', 'true');
+                usedIsolated = true;
 
                 // 2. Attempt Isolated Fetch (Bypass LocalStorage)
-                // We manually inject the token since this client has no session state
                 const isolatedClient = createClient(finalUrl, finalKey, {
                     global: { headers: { Authorization: `Bearer ${session?.access_token}` } },
                     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
@@ -120,79 +141,75 @@ const Profile: React.FC = () => {
                 
                 if (!error && data) {
                     profile = data;
-                    setDebugInfo("Loaded via Isolated Client (Storage Bypass)");
+                    if(mountedRef.current) setDebugInfo("Loaded via Isolated Client (Storage Bypass)");
                 } else if (error) {
-                    setDebugInfo(`Fetch Error: ${error.message}`);
+                    if(mountedRef.current) setDebugInfo(`Isolated Error: ${error.message}`);
                 }
             }
 
-            if (signal.aborted) return;
+            if (signal.aborted || !mountedRef.current) return;
 
             if (!profile) {
-                setDebugInfo(prev => prev + " | Profile missing");
-                // Create a basic skeleton from session if DB row is missing
-                setStatusMsg({ 
-                    type: 'warning', 
-                    text: 'Profile not found.', 
-                    detail: 'Loaded basic info from login. Database row might be missing.' 
-                });
+                // Fallback to Session Metadata if DB fetch fails completely
+                if(mountedRef.current) {
+                    setDebugInfo(prev => prev + " | Profile missing");
+                    setStatusMsg({ 
+                        type: 'warning', 
+                        text: 'Profile not found.', 
+                        detail: 'Loaded basic info from login. Database row might be missing.' 
+                    });
+                }
             }
 
-            // 3. Fetch User Role (Legacy check)
-            // We use the same strategy (Global -> Fallback Isolated) implicitly by checking profile first
-            // But for role table, let's just try global and ignore if fails to keep it fast
-            const { data: roleData } = await supabase
-                .from('user_roles')
-                .select('role')
-                .eq('user_id', userId)
-                .maybeSingle();
-
-            // Determine System Role
-            if (roleData?.role && ['board', 'admin'].includes(roleData.role)) {
-                finalRole = roleData.role;
-            } else if (profile?.role && ['board', 'admin'].includes(profile.role)) {
+            // 3. System Role Check (Quick check)
+            let finalRole = 'user';
+            
+            // Try to get role from profile first
+            if (profile?.role && ['board', 'admin'].includes(profile.role)) {
                 finalRole = profile.role;
             } else {
+                 // Fallback to user_metadata (fastest)
                  const metaRole = session?.user?.user_metadata?.role;
                  if (metaRole) finalRole = metaRole;
+                 
+                 // Last resort: query user_roles table using same client method
+                 try {
+                     const clientToUse = usedIsolated ? createClient(finalUrl, finalKey, { global: { headers: { Authorization: `Bearer ${session?.access_token}` } }, auth: { persistSession: false } }) : supabase;
+                     const { data: roleData } = await clientToUse
+                        .from('user_roles')
+                        .select('role')
+                        .eq('user_id', userId)
+                        .maybeSingle();
+                     if (roleData?.role) finalRole = roleData.role;
+                 } catch (e) { /* ignore role fetch error */ }
             }
 
             // Apply Data to State
-            if (profile) {
+            if (mountedRef.current) {
+                const meta = session?.user?.user_metadata || {};
+                const sessEmail = session?.user?.email;
+
                 setFormData({
-                    full_name: profile.full_name || session?.user?.user_metadata?.full_name || '',
-                    username: profile.username || session?.user?.user_metadata?.username || '',
-                    email: profile.email || session?.user?.email || '',
-                    board_role: profile.board_role || '', 
+                    full_name: profile?.full_name || meta.full_name || '',
+                    username: profile?.username || meta.username || '',
+                    email: profile?.email || sessEmail || '',
+                    board_role: profile?.board_role || '', 
                     system_role: finalRole
                 });
                 
-                // Only update model if different and valid
-                if (profile.car_model && MODELS.some(m => m.id === profile.car_model)) {
+                if (profile?.car_model && MODELS.some(m => m.id === profile.car_model)) {
                     if (model !== profile.car_model) {
                         setModel(profile.car_model as MiniModel);
                     }
                 }
-            } else {
-                // Fallback from Session
-                setFormData({
-                    full_name: session?.user?.user_metadata?.full_name || '',
-                    username: session?.user?.user_metadata?.username || '',
-                    email: session?.user?.email || '',
-                    board_role: '',
-                    system_role: finalRole
-                });
+                setLoadingData(false);
             }
 
         } catch (err: any) {
-            if (err.name === 'AbortError') {
-                console.log('Fetch aborted');
-                return;
-            }
+            if (err.name === 'AbortError') return;
             console.error("Critical Profile Error:", err);
-            setDebugInfo(`Critical: ${err.message}`);
-        } finally {
-            if (!signal.aborted) {
+            if(mountedRef.current) {
+                setDebugInfo(`Critical: ${err.message}`);
                 setLoadingData(false);
             }
         }
@@ -224,7 +241,7 @@ const Profile: React.FC = () => {
                 return;
             }
 
-            // Use temporary non-persisted client for clean update to avoid session conflicts
+            // Always use Isolated Client for writing to be safe if global is bad
             const tempClient = createClient(finalUrl, finalKey, {
                 global: { headers: { Authorization: `Bearer ${session?.access_token}` } },
                 auth: { persistSession: false }
@@ -243,7 +260,6 @@ const Profile: React.FC = () => {
             const { error } = await tempClient.from('profiles').upsert(updates);
             
             if (error) {
-                // If column missing, try minimal update
                 if (error.code === '42703') { 
                     const minimalUpdates = {
                         id: userId,
@@ -274,7 +290,7 @@ const Profile: React.FC = () => {
             console.error("Save Error:", error);
             setStatusMsg({ type: 'error', text: error.message || 'Save failed.' });
         } finally {
-            setSaving(false);
+            if(mountedRef.current) setSaving(false);
         }
     };
 
@@ -299,7 +315,10 @@ const Profile: React.FC = () => {
                         <span className="font-bold">ID:</span> {userId?.substring(0, 8)}...
                         {debugInfo && <span className="ml-2 text-yellow-600 dark:text-yellow-500 border-l border-slate-300 pl-2"> {debugInfo}</span>}
                     </div>
-                    <button onClick={() => fetchProfileData(false)} className="flex items-center gap-1 hover:text-mini-red transition-colors">
+                    <button onClick={() => { 
+                        window.sessionStorage.removeItem('nmcs_global_client_bad'); 
+                        fetchProfileData(false); 
+                    }} className="flex items-center gap-1 hover:text-mini-red transition-colors">
                         <RefreshCw size={10} /> Force Refresh
                     </button>
                 </div>
