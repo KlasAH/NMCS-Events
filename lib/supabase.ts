@@ -27,6 +27,8 @@ const getEnvVar = (key: string) => {
 const ENV_URL = getEnvVar('VITE_SUPABASE_URL');
 const ENV_KEY = getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('VITE_SUPABASE_KEY');
 
+// FAILSAFE: Hardcoded credentials from your project settings.
+// This ensures the app works even if .env files fail to load in Docker/Coolify.
 const FALLBACK_URL = 'https://pcaoooqwelvvgadjxdxb.supabase.co';
 const FALLBACK_KEY = 'sb_publishable_nF7UKNAIro7QgDs0e5g6Lg_9vw9IRuF';
 
