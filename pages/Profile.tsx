@@ -1,15 +1,16 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 // @ts-ignore
 import { Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Mail, Shield, CheckCircle, Save, Lock, AlertCircle, Wrench, HelpCircle, Loader2, AtSign, RefreshCw, Database } from 'lucide-react';
+import { User, Mail, Shield, CheckCircle, Save, Lock, AlertCircle, Wrench, Loader2, AtSign, RefreshCw, Database } from 'lucide-react';
 import { useTheme, MODELS, MiniModel } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import SupabaseTester from '../components/SupabaseTester';
+import { useDataSync } from '../hooks/useDataSync';
 
 const BOARD_ROLES = [
     'Ordförande',
@@ -19,19 +20,24 @@ const BOARD_ROLES = [
     'Suppleant'
 ];
 
-// Helper for strict timeouts
-const timeoutPromise = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error('Request Timed Out')), ms));
+interface ProfileData {
+    full_name: string;
+    username: string;
+    email: string;
+    board_role: string;
+    system_role: string;
+    car_model?: string;
+}
 
 const Profile: React.FC = () => {
-    const { session, loading, updatePassword } = useAuth();
+    const { session, updatePassword } = useAuth();
     const { model, setModel } = useTheme();
     const { t } = useLanguage();
     
     const userId = session?.user?.id;
-    const mountedRef = useRef(true);
 
     // Form State
-    const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState<ProfileData>({
         full_name: '',
         username: '',
         email: '',
@@ -39,188 +45,95 @@ const Profile: React.FC = () => {
         system_role: 'user'
     });
 
-    const [loadingData, setLoadingData] = useState(true);
     const [saving, setSaving] = useState(false);
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'warning' | 'error', text: string, detail?: string } | null>(null);
     const [showFixer, setShowFixer] = useState(false);
     const [newPassword, setNewPassword] = useState('');
-    const [debugInfo, setDebugInfo] = useState<string>('');
     
-    useEffect(() => {
-        return () => { mountedRef.current = false; };
-    }, []);
-
-    // SAFETY: If loading takes too long (>5s), force it to stop. 
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (loadingData && mountedRef.current) {
-                console.warn("[Profile] Safety timeout triggered");
-                setLoadingData(false);
-                setDebugInfo(prev => (prev ? prev + " | " : "") + "Forced Load (Timeout)");
-            }
-        }, 5000);
-        return () => clearTimeout(timer);
-    }, [loadingData]);
-
-    const fetchProfileData = useCallback(async (isRetry = false) => {
-        if (!userId) {
-            if(mountedRef.current) setLoadingData(false);
-            return;
-        }
-
-        if (isDemoMode) {
-            if(mountedRef.current) {
-                setLoadingData(false);
-                setFormData({
+    // --- IMPLEMENT DATA SYNC (Stale-While-Revalidate) ---
+    const { data: syncedProfile, loading: syncLoading, refresh } = useDataSync<ProfileData>(
+        `profile_${userId}`, 
+        'profiles',
+        async () => {
+            if (!userId) return null;
+            
+            if (isDemoMode) {
+                 return {
                     full_name: 'Demo User',
                     username: '@demo',
                     email: 'demo@example.com',
                     board_role: 'Ordförande',
-                    system_role: 'admin'
-                });
+                    system_role: 'admin',
+                    car_model: 'r53'
+                };
             }
-            return;
-        }
 
-        if(mountedRef.current) {
-            setLoadingData(true);
-            if(!isRetry) setDebugInfo('');
-        }
-
-        const abortController = new AbortController();
-        const signal = abortController.signal;
-
-        try {
-            // STRATEGY: Race the Global Client against a 2-second timeout.
-            // If it hangs (due to local storage issues), we fail fast and use the Isolated Client.
+            // 1. Fetch Profile
+            const { data: profile, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .maybeSingle();
             
-            let profile = null;
-            let usedIsolated = false;
-            
-            // 1. Attempt Global Fetch with Strict Timeout
-            try {
-                // If global client is already suspected bad (from previous error), skip it
-                if (window.sessionStorage.getItem('nmcs_global_client_bad')) throw new Error("Skipping Global Client (Marked Bad)");
+            if (error) throw error;
 
-                const fetchPromise = supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', userId)
-                    .abortSignal(signal)
-                    .maybeSingle();
-                
-                // RACE: 2000ms limit
-                const { data, error } = await Promise.race([
-                    fetchPromise,
-                    timeoutPromise(2000)
-                ]) as any;
-                
-                if (error) throw error;
-                profile = data;
-                if(mountedRef.current) setDebugInfo("Loaded via Global Client");
-            } catch (err: any) {
-                if (signal.aborted) return;
-                console.warn("[Profile] Global client failed/timed out, switching to isolated...", err.message);
-                
-                // Mark global as bad for this session to speed up future requests
-                window.sessionStorage.setItem('nmcs_global_client_bad', 'true');
-                usedIsolated = true;
-
-                // 2. Attempt Isolated Fetch (Bypass LocalStorage)
-                const isolatedClient = createClient(finalUrl, finalKey, {
-                    global: { headers: { Authorization: `Bearer ${session?.access_token}` } },
-                    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
-                });
-
-                const { data, error } = await isolatedClient
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', userId)
-                    .abortSignal(signal)
-                    .maybeSingle();
-                
-                if (!error && data) {
-                    profile = data;
-                    if(mountedRef.current) setDebugInfo("Loaded via Isolated Client (Storage Bypass)");
-                } else if (error) {
-                    if(mountedRef.current) setDebugInfo(`Isolated Error: ${error.message}`);
-                }
-            }
-
-            if (signal.aborted || !mountedRef.current) return;
-
-            if (!profile) {
-                // Fallback to Session Metadata if DB fetch fails completely
-                if(mountedRef.current) {
-                    setDebugInfo(prev => prev + " | Profile missing");
-                    setStatusMsg({ 
-                        type: 'warning', 
-                        text: 'Profile not found.', 
-                        detail: 'Loaded basic info from login. Database row might be missing.' 
-                    });
-                }
-            }
-
-            // 3. System Role Check (Quick check)
+            // 2. Determine Role (Profile vs User Metadata vs User Roles table)
             let finalRole = 'user';
             
-            // Try to get role from profile first
+            // Priority 1: Profile table
             if (profile?.role && ['board', 'admin'].includes(profile.role)) {
                 finalRole = profile.role;
             } else {
-                 // Fallback to user_metadata (fastest)
+                 // Priority 2: Session Metadata (Fastest fallback)
                  const metaRole = session?.user?.user_metadata?.role;
                  if (metaRole) finalRole = metaRole;
                  
-                 // Last resort: query user_roles table using same client method
+                 // Priority 3: User Roles Table
                  try {
-                     const clientToUse = usedIsolated ? createClient(finalUrl, finalKey, { global: { headers: { Authorization: `Bearer ${session?.access_token}` } }, auth: { persistSession: false } }) : supabase;
-                     const { data: roleData } = await clientToUse
+                     const { data: roleData } = await supabase
                         .from('user_roles')
                         .select('role')
                         .eq('user_id', userId)
                         .maybeSingle();
                      if (roleData?.role) finalRole = roleData.role;
-                 } catch (e) { /* ignore role fetch error */ }
+                 } catch (e) { /* ignore */ }
             }
 
-            // Apply Data to State
-            if (mountedRef.current) {
-                const meta = session?.user?.user_metadata || {};
-                const sessEmail = session?.user?.email;
+            const meta = session?.user?.user_metadata || {};
+            const sessEmail = session?.user?.email;
 
-                setFormData({
-                    full_name: profile?.full_name || meta.full_name || '',
-                    username: profile?.username || meta.username || '',
-                    email: profile?.email || sessEmail || '',
-                    board_role: profile?.board_role || '', 
-                    system_role: finalRole
-                });
-                
-                if (profile?.car_model && MODELS.some(m => m.id === profile.car_model)) {
-                    if (model !== profile.car_model) {
-                        setModel(profile.car_model as MiniModel);
-                    }
+            return {
+                full_name: profile?.full_name || meta.full_name || '',
+                username: profile?.username || meta.username || '',
+                email: profile?.email || sessEmail || '',
+                board_role: profile?.board_role || '',
+                system_role: finalRole,
+                car_model: profile?.car_model
+            };
+        },
+        [userId] // Dependency for fetcher re-creation
+    );
+
+    // Update form when synced data arrives (or loads from cache)
+    useEffect(() => {
+        if (syncedProfile) {
+            setFormData(prev => ({
+                ...prev,
+                full_name: syncedProfile.full_name,
+                username: syncedProfile.username,
+                email: syncedProfile.email,
+                board_role: syncedProfile.board_role,
+                system_role: syncedProfile.system_role
+            }));
+
+            // Sync Theme Model if it differs
+            if (syncedProfile.car_model && MODELS.some(m => m.id === syncedProfile.car_model)) {
+                if (model !== syncedProfile.car_model) {
+                    setModel(syncedProfile.car_model as MiniModel);
                 }
-                setLoadingData(false);
-            }
-
-        } catch (err: any) {
-            if (err.name === 'AbortError') return;
-            console.error("Critical Profile Error:", err);
-            if(mountedRef.current) {
-                setDebugInfo(`Critical: ${err.message}`);
-                setLoadingData(false);
             }
         }
-        
-        return () => abortController.abort();
-    }, [userId, model, session]);
-
-    // Trigger Fetch on Mount / User Change
-    useEffect(() => {
-        fetchProfileData();
-    }, [fetchProfileData]);
+    }, [syncedProfile, model, setModel]);
 
     const handleInputChange = (field: string, value: string) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -276,7 +189,7 @@ const Profile: React.FC = () => {
                 }
             } else {
                 setStatusMsg({ type: 'success', text: 'Profile saved successfully!' });
-                setDebugInfo(`Saved at ${new Date().toLocaleTimeString()}`);
+                refresh(); // Manually trigger a re-sync to update cache
             }
 
             if (newPassword) {
@@ -290,15 +203,9 @@ const Profile: React.FC = () => {
             console.error("Save Error:", error);
             setStatusMsg({ type: 'error', text: error.message || 'Save failed.' });
         } finally {
-            if(mountedRef.current) setSaving(false);
+            setSaving(false);
         }
     };
-
-    if (loading) return (
-        <div className="min-h-screen flex items-center justify-center">
-            <Loader2 className="animate-spin text-mini-red" size={48} />
-        </div>
-    );
     
     if (!session) return <Navigate to="/login" replace />;
 
@@ -313,12 +220,9 @@ const Profile: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-slate-950 px-6 py-2 text-[10px] font-mono text-slate-400 flex justify-between items-center border-b border-slate-200 dark:border-slate-800">
                     <div className="flex gap-2 items-center">
                         <span className="font-bold">ID:</span> {userId?.substring(0, 8)}...
-                        {debugInfo && <span className="ml-2 text-yellow-600 dark:text-yellow-500 border-l border-slate-300 pl-2"> {debugInfo}</span>}
+                        {syncLoading && <span className="ml-2 text-blue-500 animate-pulse">Syncing...</span>}
                     </div>
-                    <button onClick={() => { 
-                        window.sessionStorage.removeItem('nmcs_global_client_bad'); 
-                        fetchProfileData(false); 
-                    }} className="flex items-center gap-1 hover:text-mini-red transition-colors">
+                    <button onClick={() => refresh()} className="flex items-center gap-1 hover:text-mini-red transition-colors">
                         <RefreshCw size={10} /> Force Refresh
                     </button>
                 </div>
@@ -349,7 +253,8 @@ const Profile: React.FC = () => {
                 </AnimatePresence>
 
                 <div className="p-8 md:p-12 relative">
-                    {loadingData && (
+                    {/* Only show full loader if we have NO cached data and are syncing */}
+                    {syncLoading && !syncedProfile && (
                         <div className="absolute inset-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
                             <Loader2 className="animate-spin text-mini-red" size={32} />
                         </div>
