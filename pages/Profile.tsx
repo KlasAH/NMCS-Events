@@ -72,7 +72,10 @@ const Profile: React.FC = () => {
             .eq('id', userId)
             .maybeSingle();
         
-        if (error) throw error;
+        if (error) {
+            console.error("Fetch Profile Error", error);
+            // Don't throw, return partial data from session if DB fails
+        }
 
         // 2. Determine Role
         let finalRole = 'user';
@@ -105,14 +108,17 @@ const Profile: React.FC = () => {
             system_role: finalRole,
             car_model: profile?.car_model
         };
-    }, [userId, session]); // Dependencies for fetcher
+    }, [userId, session]);
 
     // --- USE DATA SYNC ---
-    const { data: syncedProfile, isLoading, isValidating, refresh } = useDataSync<ProfileData>(
-        `profile_${userId}`, 
+    // Key: ensure it's simple. If no user, 'guest'.
+    const hookKey = userId ? `profile_${userId}` : 'profile_guest';
+    
+    const { data: syncedProfile, isLoading, isValidating, refresh, error: syncError } = useDataSync<ProfileData>(
+        hookKey,
         'profiles',
         fetchProfile,
-        [userId] // Hook dependency to recreate sync function
+        [userId] 
     );
 
     // Update form when synced data arrives (or loads from cache)
@@ -120,11 +126,11 @@ const Profile: React.FC = () => {
         if (syncedProfile) {
             setFormData(prev => ({
                 ...prev,
-                full_name: syncedProfile.full_name,
-                username: syncedProfile.username,
-                email: syncedProfile.email,
-                board_role: syncedProfile.board_role,
-                system_role: syncedProfile.system_role
+                full_name: syncedProfile.full_name || '',
+                username: syncedProfile.username || '',
+                email: syncedProfile.email || '',
+                board_role: syncedProfile.board_role || '',
+                system_role: syncedProfile.system_role || 'user'
             }));
 
             // Sync Theme Model if it differs
@@ -227,6 +233,11 @@ const Profile: React.FC = () => {
                                 <RefreshCw className="animate-spin" size={10} /> Syncing...
                             </span>
                         )}
+                        {syncError && (
+                            <span className="ml-2 flex items-center gap-1 text-red-500 font-bold" title={String(syncError)}>
+                                <AlertCircle size={10} /> Sync Failed
+                            </span>
+                        )}
                     </div>
                     <button onClick={() => refresh()} className="flex items-center gap-1 hover:text-mini-red transition-colors">
                         <RefreshCw size={10} /> Force Refresh
@@ -265,6 +276,7 @@ const Profile: React.FC = () => {
                             <div className="flex flex-col items-center gap-4">
                                 <Loader2 className="animate-spin text-mini-red" size={48} />
                                 <p className="text-slate-500 font-medium animate-pulse">Loading Profile...</p>
+                                <button onClick={() => refresh()} className="text-xs text-blue-500 hover:underline mt-4">Stuck? Click to retry.</button>
                             </div>
                         </div>
                     )}

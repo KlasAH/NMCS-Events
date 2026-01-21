@@ -19,7 +19,7 @@ export function useDataSync<T>(
     const isMounted = useRef(true);
     const fetcherRef = useRef(fetcher);
 
-    // Keep fetcher ref current to avoid effect re-runs just because function identity changed
+    // Keep fetcher ref current
     useEffect(() => {
         fetcherRef.current = fetcher;
     });
@@ -32,6 +32,8 @@ export function useDataSync<T>(
             return item ? JSON.parse(item) : null;
         } catch (error) {
             console.warn(`Error reading localStorage key "${k}":`, error);
+            // If cache is corrupted, clear it
+            window.localStorage.removeItem(k);
             return null;
         }
     };
@@ -43,14 +45,12 @@ export function useDataSync<T>(
     const [error, setError] = useState<any>(null);
     const [currentKey, setCurrentKey] = useState(key);
 
-    // Handle Key Changes (e.g. User ID updates)
-    // This pattern allows us to reset state *during* render if key changes, avoiding a flash of old content
+    // Handle Key Changes synchronously during render to avoid flash
     if (key !== currentKey) {
         setCurrentKey(key);
         const cached = readCache(key);
         setData(cached);
         setIsLoading(!cached);
-        // Error is reset on key change
         setError(null);
     }
 
@@ -58,33 +58,56 @@ export function useDataSync<T>(
         if (!isMounted.current) return;
         
         setIsValidating(true);
-        // If we have no data, we are also "loading"
+        // Only set blocking loading if we have absolutely no data
         if (!data) setIsLoading(true);
 
+        let timeoutId: ReturnType<typeof setTimeout>;
+
         try {
-            const freshData = await fetcherRef.current();
+            // Create a timeout promise to prevent hanging forever
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => {
+                    reject(new Error("Network timeout (10s)"));
+                }, 10000);
+            });
+
+            // Race the fetcher against the timeout
+            const freshData = await Promise.race([
+                fetcherRef.current(),
+                timeoutPromise
+            ]);
             
             if (isMounted.current) {
-                // If the fetcher returns null (e.g. no user ID yet), we shouldn't wipe cache unless necessary.
-                // But generally if fetcher returns, we trust it.
-                
                 if (freshData !== null) {
-                    const freshStr = JSON.stringify(freshData);
-                    const currentStr = localStorage.getItem(key);
+                    try {
+                        const freshStr = JSON.stringify(freshData);
+                        const currentStr = localStorage.getItem(key);
 
-                    // Only update state/storage if different
-                    if (freshStr !== currentStr) {
-                        localStorage.setItem(key, freshStr);
+                        if (freshStr !== currentStr) {
+                            localStorage.setItem(key, freshStr);
+                            setData(freshData);
+                        }
+                    } catch (serializationError) {
+                        console.error("Failed to serialize data for cache:", serializationError);
+                        // Still update state even if cache fails
                         setData(freshData);
                     }
                 }
             }
-        } catch (err) {
+        } catch (err: any) {
             if (isMounted.current) {
-                console.error(`[DataSync] Error syncing ${key}`, err);
+                console.error(`[DataSync] Error syncing ${key}:`, err);
                 setError(err);
+                
+                // If we have an error and no data, we must stop loading so the UI can show the error
+                if (!data) {
+                    setIsLoading(false);
+                }
             }
         } finally {
+            // @ts-ignore
+            if (timeoutId) clearTimeout(timeoutId);
+            
             if (isMounted.current) {
                 setIsValidating(false);
                 setIsLoading(false);
@@ -113,11 +136,7 @@ export function useDataSync<T>(
                     sync();
                 }
             )
-            .subscribe((status) => {
-                 if(status === 'SUBSCRIBED') {
-                     // Optional: log subscription success
-                 }
-            });
+            .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
