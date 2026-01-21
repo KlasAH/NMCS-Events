@@ -41,7 +41,7 @@ type FilterType = 'all' | 'upcoming' | 'past';
 
 const Home: React.FC = () => {
   // Replace standard state with synced data
-  const { data: meetingsData, loading } = useDataSync<Meeting[]>(
+  const { data: meetingsData, isLoading } = useDataSync<Meeting[]>(
     'meetings_list', // LocalStorage Key
     'meetings',      // Supabase Table to listen to
     async () => {
@@ -255,7 +255,7 @@ const Home: React.FC = () => {
       </motion.div>
 
       {/* Events Grid */}
-      {loading ? (
+      {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-pulse">
             {[1,2,3,4].map(i => (
                 <div key={i} className={`bg-slate-200 dark:bg-slate-800 rounded-3xl h-64 ${i===1 ? 'md:col-span-2 md:row-span-2' : ''}`}></div>

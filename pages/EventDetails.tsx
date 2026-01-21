@@ -57,7 +57,7 @@ const EventDetails: React.FC = () => {
   const { session } = useAuth();
   
   // Use Data Sync Hook
-  const { data: meeting, loading } = useDataSync<Meeting>(
+  const { data: meeting, isLoading } = useDataSync<Meeting>(
       `meeting_${id}`,
       'meetings',
       async () => {
@@ -199,7 +199,7 @@ const EventDetails: React.FC = () => {
       </div>
   );
 
-  if (loading) return <div className="pt-32 text-center dark:text-white">Loading...</div>;
+  if (isLoading) return <div className="pt-32 text-center dark:text-white">Loading...</div>;
   if (!meeting) return <div className="pt-32 text-center dark:text-white">Event not found</div>;
 
   const hotels = getHotels();

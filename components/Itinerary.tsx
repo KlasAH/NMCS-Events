@@ -25,7 +25,7 @@ const mockItinerary: ItineraryItem[] = [
 ];
 
 const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
-  const { data: syncedItems, loading } = useDataSync<ItineraryItem[]>(
+  const { data: syncedItems, isLoading } = useDataSync<ItineraryItem[]>(
       `itinerary_${meetingId}`,
       'itinerary_items',
       async () => {
@@ -52,10 +52,10 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
 
   // Set default expansion on load
   React.useEffect(() => {
-      if (!loading && items.length > 0 && Object.keys(expandedDates).length === 0) {
+      if (!isLoading && items.length > 0 && Object.keys(expandedDates).length === 0) {
            setExpandedDates({ [items[0].date]: true });
       }
-  }, [loading, items]);
+  }, [isLoading, items]);
 
   // Group items by date
   const groupedItems = useMemo(() => {
@@ -89,7 +89,7 @@ const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
       }
   };
 
-  if (loading) return <div className="p-4 text-center text-slate-400 animate-pulse">{t('itinerary')}...</div>;
+  if (isLoading) return <div className="p-4 text-center text-slate-400 animate-pulse">{t('itinerary')}...</div>;
 
   return (
     <>

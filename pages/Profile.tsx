@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
@@ -50,68 +50,69 @@ const Profile: React.FC = () => {
     const [showFixer, setShowFixer] = useState(false);
     const [newPassword, setNewPassword] = useState('');
     
-    // --- IMPLEMENT DATA SYNC (Stale-While-Revalidate) ---
-    const { data: syncedProfile, loading: syncLoading, refresh } = useDataSync<ProfileData>(
+    // --- STABLE FETCHER CALLBACK ---
+    const fetchProfile = useCallback(async () => {
+        if (!userId) return null;
+        
+        if (isDemoMode) {
+             return {
+                full_name: 'Demo User',
+                username: '@demo',
+                email: 'demo@example.com',
+                board_role: 'Ordförande',
+                system_role: 'admin',
+                car_model: 'r53'
+            };
+        }
+
+        // 1. Fetch Profile
+        const { data: profile, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle();
+        
+        if (error) throw error;
+
+        // 2. Determine Role
+        let finalRole = 'user';
+        if (profile?.role && ['board', 'admin'].includes(profile.role)) {
+            finalRole = profile.role;
+        } else {
+             // Priority 2: Session Metadata
+             const metaRole = session?.user?.user_metadata?.role;
+             if (metaRole) finalRole = metaRole;
+             
+             // Priority 3: User Roles Table
+             try {
+                 const { data: roleData } = await supabase
+                    .from('user_roles')
+                    .select('role')
+                    .eq('user_id', userId)
+                    .maybeSingle();
+                 if (roleData?.role) finalRole = roleData.role;
+             } catch (e) { /* ignore */ }
+        }
+
+        const meta = session?.user?.user_metadata || {};
+        const sessEmail = session?.user?.email;
+
+        return {
+            full_name: profile?.full_name || meta.full_name || '',
+            username: profile?.username || meta.username || '',
+            email: profile?.email || sessEmail || '',
+            board_role: profile?.board_role || '',
+            system_role: finalRole,
+            car_model: profile?.car_model
+        };
+    }, [userId, session]); // Dependencies for fetcher
+
+    // --- USE DATA SYNC ---
+    const { data: syncedProfile, isLoading, isValidating, refresh } = useDataSync<ProfileData>(
         `profile_${userId}`, 
         'profiles',
-        async () => {
-            if (!userId) return null;
-            
-            if (isDemoMode) {
-                 return {
-                    full_name: 'Demo User',
-                    username: '@demo',
-                    email: 'demo@example.com',
-                    board_role: 'Ordförande',
-                    system_role: 'admin',
-                    car_model: 'r53'
-                };
-            }
-
-            // 1. Fetch Profile
-            const { data: profile, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', userId)
-                .maybeSingle();
-            
-            if (error) throw error;
-
-            // 2. Determine Role (Profile vs User Metadata vs User Roles table)
-            let finalRole = 'user';
-            
-            // Priority 1: Profile table
-            if (profile?.role && ['board', 'admin'].includes(profile.role)) {
-                finalRole = profile.role;
-            } else {
-                 // Priority 2: Session Metadata (Fastest fallback)
-                 const metaRole = session?.user?.user_metadata?.role;
-                 if (metaRole) finalRole = metaRole;
-                 
-                 // Priority 3: User Roles Table
-                 try {
-                     const { data: roleData } = await supabase
-                        .from('user_roles')
-                        .select('role')
-                        .eq('user_id', userId)
-                        .maybeSingle();
-                     if (roleData?.role) finalRole = roleData.role;
-                 } catch (e) { /* ignore */ }
-            }
-
-            const meta = session?.user?.user_metadata || {};
-            const sessEmail = session?.user?.email;
-
-            return {
-                full_name: profile?.full_name || meta.full_name || '',
-                username: profile?.username || meta.username || '',
-                email: profile?.email || sessEmail || '',
-                board_role: profile?.board_role || '',
-                system_role: finalRole,
-                car_model: profile?.car_model
-            };
-        },
-        [userId] // Dependency for fetcher re-creation
+        fetchProfile,
+        [userId] // Hook dependency to recreate sync function
     );
 
     // Update form when synced data arrives (or loads from cache)
@@ -220,7 +221,12 @@ const Profile: React.FC = () => {
                 <div className="bg-slate-100 dark:bg-slate-950 px-6 py-2 text-[10px] font-mono text-slate-400 flex justify-between items-center border-b border-slate-200 dark:border-slate-800">
                     <div className="flex gap-2 items-center">
                         <span className="font-bold">ID:</span> {userId?.substring(0, 8)}...
-                        {syncLoading && <span className="ml-2 text-blue-500 animate-pulse">Syncing...</span>}
+                        {/* Only show "Syncing" if we already have data but are checking for updates */}
+                        {isValidating && syncedProfile && (
+                            <span className="ml-2 flex items-center gap-1 text-blue-500">
+                                <RefreshCw className="animate-spin" size={10} /> Syncing...
+                            </span>
+                        )}
                     </div>
                     <button onClick={() => refresh()} className="flex items-center gap-1 hover:text-mini-red transition-colors">
                         <RefreshCw size={10} /> Force Refresh
@@ -253,10 +259,13 @@ const Profile: React.FC = () => {
                 </AnimatePresence>
 
                 <div className="p-8 md:p-12 relative">
-                    {/* Only show full loader if we have NO cached data and are syncing */}
-                    {syncLoading && !syncedProfile && (
-                        <div className="absolute inset-0 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                            <Loader2 className="animate-spin text-mini-red" size={32} />
+                    {/* Only show blocking loader if we have NO data at all (first load, no cache) */}
+                    {isLoading && (
+                        <div className="absolute inset-0 bg-white dark:bg-slate-900 z-10 flex items-center justify-center">
+                            <div className="flex flex-col items-center gap-4">
+                                <Loader2 className="animate-spin text-mini-red" size={48} />
+                                <p className="text-slate-500 font-medium animate-pulse">Loading Profile...</p>
+                            </div>
                         </div>
                     )}
 

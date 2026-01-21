@@ -4,76 +4,104 @@ import { supabase, isDemoMode } from '../lib/supabase';
 
 interface UseDataSyncResult<T> {
     data: T | null;
-    loading: boolean;
+    isLoading: boolean;     // True ONLY if no data exists and we are fetching
+    isValidating: boolean;  // True whenever we are fetching (background or foreground)
     error: any;
     refresh: () => Promise<void>;
 }
 
 export function useDataSync<T>(
     key: string,
-    tableName: string,
+    tableName: string | null, // Allow null to skip subscription
     fetcher: () => Promise<T | null>,
     dependencies: any[] = []
 ): UseDataSyncResult<T> {
-    // Initialize state from LocalStorage if available to ensure instant load
-    const [data, setData] = useState<T | null>(() => {
+    const isMounted = useRef(true);
+    const fetcherRef = useRef(fetcher);
+
+    // Keep fetcher ref current to avoid effect re-runs just because function identity changed
+    useEffect(() => {
+        fetcherRef.current = fetcher;
+    });
+
+    // Helper to read cache safely
+    const readCache = (k: string): T | null => {
+        if (typeof window === 'undefined') return null;
         try {
-            const cached = localStorage.getItem(key);
-            return cached ? JSON.parse(cached) : null;
-        } catch (e) {
-            console.warn('Error reading from localStorage', e);
+            const item = window.localStorage.getItem(k);
+            return item ? JSON.parse(item) : null;
+        } catch (error) {
+            console.warn(`Error reading localStorage key "${k}":`, error);
             return null;
         }
-    });
-    
-    // If we have data from cache, we aren't "loading" in the UI sense, 
-    // but we are syncing in the background.
-    const [loading, setLoading] = useState<boolean>(!data);
-    const [error, setError] = useState<any>(null);
-    const isMounted = useRef(true);
+    };
 
-    // The core sync function
+    // State
+    const [data, setData] = useState<T | null>(() => readCache(key));
+    const [isLoading, setIsLoading] = useState<boolean>(() => !readCache(key));
+    const [isValidating, setIsValidating] = useState<boolean>(false);
+    const [error, setError] = useState<any>(null);
+    const [currentKey, setCurrentKey] = useState(key);
+
+    // Handle Key Changes (e.g. User ID updates)
+    // This pattern allows us to reset state *during* render if key changes, avoiding a flash of old content
+    if (key !== currentKey) {
+        setCurrentKey(key);
+        const cached = readCache(key);
+        setData(cached);
+        setIsLoading(!cached);
+        // Error is reset on key change
+        setError(null);
+    }
+
     const sync = useCallback(async () => {
         if (!isMounted.current) return;
         
+        setIsValidating(true);
+        // If we have no data, we are also "loading"
+        if (!data) setIsLoading(true);
+
         try {
-            const networkData = await fetcher();
+            const freshData = await fetcherRef.current();
             
             if (isMounted.current) {
-                // Deep comparison via stringify (sufficient for this app size)
-                const prevString = localStorage.getItem(key);
-                const newString = JSON.stringify(networkData);
+                // If the fetcher returns null (e.g. no user ID yet), we shouldn't wipe cache unless necessary.
+                // But generally if fetcher returns, we trust it.
+                
+                if (freshData !== null) {
+                    const freshStr = JSON.stringify(freshData);
+                    const currentStr = localStorage.getItem(key);
 
-                if (prevString !== newString) {
-                    console.log(`[DataSync] Update detected for ${key}, syncing...`);
-                    localStorage.setItem(key, newString);
-                    setData(networkData);
+                    // Only update state/storage if different
+                    if (freshStr !== currentStr) {
+                        localStorage.setItem(key, freshStr);
+                        setData(freshData);
+                    }
                 }
-                setLoading(false);
             }
         } catch (err) {
             if (isMounted.current) {
                 console.error(`[DataSync] Error syncing ${key}`, err);
                 setError(err);
-                setLoading(false);
+            }
+        } finally {
+            if (isMounted.current) {
+                setIsValidating(false);
+                setIsLoading(false);
             }
         }
-    }, [key, ...dependencies]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [key, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // 1. Initial Load & Network Sync
     useEffect(() => {
         isMounted.current = true;
         sync();
-
-        return () => {
-            isMounted.current = false;
-        };
+        return () => { isMounted.current = false; };
     }, [sync]);
 
-    // 2. Realtime Subscription (Only if not in Demo Mode)
+    // 2. Realtime Subscription
     useEffect(() => {
-        if (isDemoMode) return;
-        if (!tableName) return;
+        if (isDemoMode || !tableName) return;
 
         const channel = supabase
             .channel(`public:${tableName}:${key}`)
@@ -81,16 +109,20 @@ export function useDataSync<T>(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: tableName },
                 (payload) => {
-                    console.log(`[DataSync] Realtime change detected in ${tableName}`, payload);
-                    sync(); // Trigger re-fetch on DB change
+                    console.log(`[DataSync] Realtime update: ${tableName}`, payload);
+                    sync();
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                 if(status === 'SUBSCRIBED') {
+                     // Optional: log subscription success
+                 }
+            });
 
         return () => {
             supabase.removeChannel(channel);
         };
     }, [tableName, key, sync]);
 
-    return { data, loading, error, refresh: sync };
+    return { data, isLoading, isValidating, error, refresh: sync };
 }
