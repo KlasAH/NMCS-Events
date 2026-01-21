@@ -1,6 +1,5 @@
 
-
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { supabase, isDemoMode } from '../lib/supabase';
 import { ItineraryItem } from '../types';
 import { Clock, Info, ChevronDown, ChevronRight, MapPin, Utensils, Car } from 'lucide-react';
@@ -10,6 +9,7 @@ import sv from 'date-fns/locale/sv';
 import enGB from 'date-fns/locale/en-GB';
 import Modal from './Modal';
 import { useLanguage } from '../context/LanguageContext';
+import { useDataSync } from '../hooks/useDataSync';
 
 interface ItineraryProps {
   meetingId: string;
@@ -25,43 +25,37 @@ const mockItinerary: ItineraryItem[] = [
 ];
 
 const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
-  const [items, setItems] = useState<ItineraryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: syncedItems, loading } = useDataSync<ItineraryItem[]>(
+      `itinerary_${meetingId}`,
+      'itinerary_items',
+      async () => {
+          if (isDemoMode) return mockItinerary;
+          const { data, error } = await supabase
+            .from('itinerary_items')
+            .select('*')
+            .eq('meeting_id', meetingId)
+            .order('date', { ascending: true })
+            .order('sort_order', { ascending: true })
+            .order('start_time', { ascending: true });
+          
+          if (error) throw error;
+          return data || [];
+      },
+      [meetingId]
+  );
+  
+  const items = syncedItems || [];
+
   const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
   const [selectedItem, setSelectedItem] = useState<ItineraryItem | null>(null);
   const { language, t } = useLanguage();
 
-  useEffect(() => {
-    if (isDemoMode) {
-        setItems(mockItinerary);
-        setLoading(false);
-        // Default expand first day for better UX
-        if(mockItinerary.length > 0) {
-            setExpandedDates({ [mockItinerary[0].date]: true });
-        }
-        return;
-    }
-
-    const fetchItinerary = async () => {
-      const { data, error } = await supabase
-        .from('itinerary_items')
-        .select('*')
-        .eq('meeting_id', meetingId)
-        .order('date', { ascending: true })
-        .order('sort_order', { ascending: true }) // Added sort_order
-        .order('start_time', { ascending: true });
-
-      if (!error && data) {
-        setItems(data);
-        if(data.length > 0) {
-             setExpandedDates({ [data[0].date]: true });
-        }
+  // Set default expansion on load
+  React.useEffect(() => {
+      if (!loading && items.length > 0 && Object.keys(expandedDates).length === 0) {
+           setExpandedDates({ [items[0].date]: true });
       }
-      setLoading(false);
-    };
-
-    fetchItinerary();
-  }, [meetingId]);
+  }, [loading, items]);
 
   // Group items by date
   const groupedItems = useMemo(() => {

@@ -12,6 +12,7 @@ import QRCode from 'react-qr-code';
 import { format } from 'date-fns';
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
+import { useDataSync } from '../hooks/useDataSync';
 import sv from 'date-fns/locale/sv';
 import enGB from 'date-fns/locale/en-GB';
 
@@ -54,9 +55,21 @@ const mockDetailMeeting: Meeting = {
 const EventDetails: React.FC = () => {
   const { id } = useParams();
   const { session } = useAuth();
-  const [meeting, setMeeting] = useState<Meeting | null>(null);
-  const [loading, setLoading] = useState(true);
   
+  // Use Data Sync Hook
+  const { data: meeting, loading } = useDataSync<Meeting>(
+      `meeting_${id}`,
+      'meetings',
+      async () => {
+          if (isDemoMode) return mockDetailMeeting;
+          if (!id) return null;
+          const { data, error } = await supabase.from('meetings').select('*').eq('id', id).single();
+          if (error) throw error;
+          return data;
+      },
+      [id]
+  );
+
   // Modals for Lists
   const [showHotelModal, setShowHotelModal] = useState(false);
   const [showParkingModal, setShowParkingModal] = useState(false);
@@ -86,32 +99,19 @@ const EventDetails: React.FC = () => {
       return Array.isArray(meeting.parking_info) ? meeting.parking_info : [meeting.parking_info];
   }
 
+  // Registration Check (Separate from sync loop to avoid complexity)
   useEffect(() => {
-    if (isDemoMode) {
-        setMeeting(mockDetailMeeting);
-        setLoading(false);
-        if (session) {
-             setRegForm({ fullName: 'Demo User', email: session.user.email || '', phone: '', forumName: '', carType: 'R56' });
-        }
-        return;
-    }
+      const checkRegistration = async () => {
+          if (!id || !session?.user || isDemoMode) {
+                if(isDemoMode && session?.user) {
+                     setRegForm({ fullName: 'Demo User', email: session.user.email || '', phone: '', forumName: '', carType: 'R56' });
+                }
+                return;
+          }
 
-    const fetchMeeting = async () => {
-      if (!id) return;
-      
-      const { data, error } = await supabase.from('meetings').select('*').eq('id', id).single();
-      if (!error && data) {
-        setMeeting(data);
-        if(data.maps_config && Array.isArray(data.maps_config) && data.maps_config.length > 0) {
-             const firstGroup = data.maps_config[0]?.groupName || 'General';
-             setExpandedMapGroups({ [firstGroup]: true });
-        }
-      }
-      setLoading(false);
-
-      if (session?.user) {
           const { data: regData } = await supabase.from('registrations').select('id').eq('meeting_id', id).eq('user_id', session.user.id).maybeSingle();
           if (regData) setIsRegistered(true);
+          
           if (!regData) {
                const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
                setRegForm({
@@ -122,11 +122,19 @@ const EventDetails: React.FC = () => {
                    carType: profile?.car_model || ''
                });
           }
-      }
-    };
-
-    fetchMeeting();
+      };
+      
+      checkRegistration();
   }, [id, session]);
+
+  // Expand first map group when meeting loads
+  useEffect(() => {
+      if(meeting?.maps_config && Array.isArray(meeting.maps_config) && meeting.maps_config.length > 0) {
+             const firstGroup = meeting.maps_config[0]?.groupName || 'General';
+             // Only set if not already set by user interaction
+             setExpandedMapGroups(prev => Object.keys(prev).length === 0 ? { [firstGroup]: true } : prev);
+      }
+  }, [meeting]);
 
   const handleRegister = async (e: React.FormEvent) => {
       e.preventDefault();

@@ -1,5 +1,4 @@
 
-
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, isDemoMode, getAssetUrl } from '../lib/supabase';
 import { Meeting } from '../types';
@@ -11,6 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import SupabaseTester from '../components/SupabaseTester';
 import { useAuth } from '../context/AuthContext';
+import { useDataSync } from '../hooks/useDataSync';
 
 const mockMeetings: Meeting[] = [
     {
@@ -40,12 +40,29 @@ const mockMeetings: Meeting[] = [
 type FilterType = 'all' | 'upcoming' | 'past';
 
 const Home: React.FC = () => {
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Replace standard state with synced data
+  const { data: meetingsData, loading } = useDataSync<Meeting[]>(
+    'meetings_list', // LocalStorage Key
+    'meetings',      // Supabase Table to listen to
+    async () => {
+        if (isDemoMode) {
+            await new Promise(r => setTimeout(r, 800));
+            return mockMeetings;
+        }
+        let query = supabase.from('meetings').select('*');
+        // Simple filter for Home page (published only)
+        query = query.eq('status', 'published');
+        const { data, error } = await query.order('date', { ascending: false });
+        if (error) throw error;
+        return data || [];
+    }
+  );
+
+  const meetings = meetingsData || [];
+
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');
   const { currentTheme } = useTheme();
-  const { isAdmin } = useAuth();
   
   // Secret Login Logic
   const [secretClicks, setSecretClicks] = useState(0);
@@ -56,34 +73,6 @@ const Home: React.FC = () => {
 
   // Tester Modal State
   const [isTesterOpen, setIsTesterOpen] = useState(false);
-
-  useEffect(() => {
-    if (isDemoMode) {
-        setTimeout(() => {
-            setMeetings(mockMeetings);
-            setLoading(false);
-        }, 800);
-        return;
-    }
-
-    const fetchMeetings = async () => {
-      let query = supabase.from('meetings').select('*');
-      
-      // If not admin, only show published. 
-      // NOTE: For now, we will filter by published status for everyone on the Home page to keep it clean.
-      // Admins view drafts in the dashboard.
-      query = query.eq('status', 'published');
-      
-      const { data, error } = await query.order('date', { ascending: false });
-      
-      if (!error && data) {
-        setMeetings(data);
-      }
-      setLoading(false);
-    };
-
-    fetchMeetings();
-  }, []);
 
   // Reset secret clicks if inactive (Login)
   useEffect(() => {
