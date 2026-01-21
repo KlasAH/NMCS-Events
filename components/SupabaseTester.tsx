@@ -1,8 +1,7 @@
 
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase, isDemoMode, finalUrl, finalKey } from '../lib/supabase';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Database, Server, AlertCircle, Copy, Check, ExternalLink, ShieldAlert, RefreshCw, X, CheckCircle2, Terminal, Play, Lock, Cpu, Save, User, Trash2, Edit3, Plus, Search, Loader2, ClipboardCopy, RotateCcw } from 'lucide-react';
 import Modal from './Modal';
 import { useAuth } from '../context/AuthContext';
@@ -201,7 +200,7 @@ type DiagnosticStep = {
 };
 
 // TIMEOUT HELPER to prevent getting stuck
-async function withTimeout(promise: any, ms = 8000): Promise<any> {
+async function withTimeout(promise: any, ms = 5000): Promise<any> {
     let timer: any;
     const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`Timeout (${ms}ms)`)), ms);
@@ -228,6 +227,16 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     // Manual / Profile Log State
     const [loadingAction, setLoadingAction] = useState<string | null>(null);
     const [consoleLogs, setConsoleLogs] = useState<{type: 'info'|'error'|'success'|'warning', msg: string, time: string}[]>([]);
+
+    // CREATE ISOLATED CLIENT FOR MANUAL TESTS
+    // This ensures tests work even if global state is broken
+    const isolatedClient = useMemo(() => createClient(finalUrl, finalKey, {
+        auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+        }
+    }), []);
 
     const log = (msg: string, type: 'info' | 'error' | 'success' | 'warning' = 'info') => {
         const time = new Date().toLocaleTimeString();
@@ -326,18 +335,9 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
             }
 
             // 4. Isolated Client Connection
-            // This tests a fresh instance with NO PERSISTENCE. If this works but global fails, it's a browser cache issue.
             updateStep('client_isolated', 'running');
             let isolatedClientWorks = false;
-            // Create fresh client
-            const isolatedClient = createClient(finalUrl, finalKey, {
-                auth: {
-                    persistSession: false,
-                    autoRefreshToken: false,
-                    detectSessionInUrl: false
-                }
-            });
-
+            
             try {
                 // Check connectivity using a lightweight query (Head request on table)
                 const { error } = await withTimeout(
@@ -345,7 +345,6 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                     5000
                 );
                 
-                // Note: Error 'PGRST116' etc is fine, it means we reached DB. Network error is not.
                 if (error && error.message && error.message.includes('fetch')) throw error;
                 
                 isolatedClientWorks = true;
@@ -392,49 +391,56 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
     }, [isOpen]);
 
 
-    // --- MANUAL TESTS ---
+    // --- MANUAL TESTS WITH FALLBACK ---
     const manualTest = async (action: 'insert' | 'read' | 'update' | 'delete') => {
         setLoadingAction(action);
-        log(`Starting ${action.toUpperCase()} test on 'connection_tests'...`, 'info');
+        log(`Starting ${action.toUpperCase()} test...`, 'info');
         
-        try {
+        let clientToUse: SupabaseClient = supabase;
+        let clientName = 'Global';
+
+        // Helper to run operation
+        const runOp = async (client: SupabaseClient) => {
             if (action === 'insert') {
-                const { data, error } = await withTimeout(
-                    supabase.from('connection_tests').insert({ 
-                        message: 'Manual Test', response_data: 'Clicked Button' 
-                    }).select().single()
-                );
-                if (error) throw error;
-                log(`Insert Success! ID: ${data.id}`, 'success');
+                return await client.from('connection_tests').insert({ 
+                    message: 'Manual Test', response_data: 'Clicked Button' 
+                }).select().single();
             }
             if (action === 'read') {
-                const { data, error } = await withTimeout(
-                    supabase.from('connection_tests').select('*').limit(3).order('created_at', {ascending:false})
-                );
-                if (error) throw error;
-                log(`Read Success! Found ${data.length} rows.`, 'success');
-                if(data.length > 0) log(`Row 1: ${JSON.stringify(data[0])}`, 'info');
+                return await client.from('connection_tests').select('*').limit(3).order('created_at', {ascending:false});
             }
             if (action === 'update') {
-                // First get a row
-                const { data: rows } = await withTimeout(supabase.from('connection_tests').select('id').limit(1));
-                if (!rows || rows.length === 0) { log('No rows to update. Insert first.', 'error'); setLoadingAction(null); return; }
-                
-                const { error } = await withTimeout(
-                    supabase.from('connection_tests').update({ message: 'Updated ' + Date.now() }).eq('id', rows[0].id)
-                );
-                if (error) throw error;
-                log(`Update Success for ID: ${rows[0].id}`, 'success');
+                const { data: rows } = await client.from('connection_tests').select('id').limit(1);
+                if (!rows || rows.length === 0) throw new Error('No rows to update');
+                return await client.from('connection_tests').update({ message: 'Updated ' + Date.now() }).eq('id', rows[0].id);
             }
             if (action === 'delete') {
-                const { error } = await withTimeout(
-                    supabase.from('connection_tests').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-                );
-                if (error) throw error;
-                log(`Delete All Success.`, 'success');
+                return await client.from('connection_tests').delete().neq('id', '00000000-0000-0000-0000-000000000000');
             }
+            return { error: { message: 'Invalid action' } } as any;
+        };
+
+        try {
+            // Try Global first
+            log(`Attempting with Global Client...`, 'info');
+            let result = await withTimeout(runOp(supabase), 3000).catch(() => ({ error: { message: 'Timeout' } }));
+            
+            // If Global fails, try Isolated
+            if (result.error) {
+                log(`Global Client Failed (${result.error.message}). Retrying with Isolated Client...`, 'warning');
+                clientToUse = isolatedClient;
+                clientName = 'Isolated';
+                result = await withTimeout(runOp(isolatedClient), 5000);
+            }
+
+            if (result.error) throw result.error;
+
+            log(`${action.toUpperCase()} Success using ${clientName} Client!`, 'success');
+            if (action === 'insert') log(`ID: ${result.data.id}`, 'info');
+            if (action === 'read') log(`Found ${result.data.length} rows.`, 'info');
+
         } catch (e: any) {
-            log(`${action.toUpperCase()} Failed: ${e.message} (Code: ${e.code || 'N/A'})`, 'error');
+            log(`${action.toUpperCase()} Failed: ${e.message}`, 'error');
         } finally {
             setLoadingAction(null);
         }
@@ -595,7 +601,7 @@ const SupabaseTester: React.FC<SupabaseTesterProps> = ({ isOpen, onClose }) => {
                                 </button>
                             </div>
                             <div className="text-xs text-slate-400 text-center">
-                                Operations target the <code>connection_tests</code> table.
+                                Operations target the <code>connection_tests</code> table. Auto-retries with Isolated Client if Global fails.
                             </div>
                         </div>
                     )}

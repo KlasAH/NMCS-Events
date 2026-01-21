@@ -34,9 +34,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (loading) {
               console.warn("[Auth] Safety timeout triggered. Forcing app load.");
               setLoading(false);
-              setAuthStatus('Timeout - Loaded anyway');
+              setAuthStatus('Timeout - Forced Load');
           }
-      }, 5000); // Reduced to 5 seconds
+      }, 5000); // Failsafe max 5 seconds
       return () => clearTimeout(safetyTimer);
   }, [loading]);
 
@@ -78,24 +78,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // 1. Check Session
+    // 1. Check Session with Timeout Protection
     const initSession = async () => {
         try {
-             // Race condition protection for initial load
-             const { data: { session }, error } = await supabase.auth.getSession();
+             const timeoutPromise = new Promise((_, reject) => 
+                 setTimeout(() => reject(new Error('AUTH_TIMEOUT')), 2500)
+             );
+
+             // Race the session check against a 2.5s timer
+             const { data, error } = await Promise.race([
+                 supabase.auth.getSession(),
+                 timeoutPromise
+             ]) as { data: { session: Session | null }, error: any };
+
              if (error) throw error;
              
-             setSession(session);
-             if (session) {
-                await checkAdmin(session);
+             setSession(data.session);
+             if (data.session) {
+                await checkAdmin(data.session);
              } else {
                 setLoading(false);
                 setAuthStatus('No Session');
              }
-        } catch (err) {
-            console.error("[Auth] Get session error:", err);
+        } catch (err: any) {
+            console.error("[Auth] Session init error:", err);
+            
+            // CRITICAL FIX: If we time out, assume LocalStorage is corrupted and clear it.
+            if (err.message === 'AUTH_TIMEOUT' || err.message?.includes('timeout')) {
+                console.warn("[Auth] Timeout detected. Purging potentially corrupted storage.");
+                
+                // Clear Supabase specific keys to fix the loop
+                Object.keys(localStorage).forEach(key => {
+                    if (key.startsWith('sb-') || key.includes('supabase')) {
+                        localStorage.removeItem(key);
+                    }
+                });
+                
+                setAuthStatus('Storage Cleared (Timeout)');
+            } else {
+                setAuthStatus('Session Error');
+            }
+            
             setLoading(false);
-            setAuthStatus('Session Error');
         }
     };
 
@@ -108,7 +132,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (session) {
           if (session.access_token !== lastCheckedToken.current) {
               // Only trigger loading if we need to re-verify admin
-              // Don't set loading=true blindly, it causes flicker or stuck state on navigation
               checkAdmin(session);
           } else {
               setLoading(false);
@@ -155,8 +178,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     
     lastCheckedToken.current = currentSession.access_token;
-    // We do NOT set loading=true here to avoid UI blocking on re-checks. 
-    // Admin features will simply appear once verified.
     
     setAuthStatus('Checking Permissions...');
     
@@ -233,7 +254,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAdmin(false);
     setLoading(false);
     lastCheckedToken.current = null;
-    if (!isDemoMode) await supabase.auth.signOut();
+    
+    // Clear storage manually before calling Supabase signOut to avoid hangs
+    Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('sb-')) localStorage.removeItem(key);
+    });
+
+    if (!isDemoMode) {
+        try {
+            await supabase.auth.signOut();
+        } catch (e) {
+            console.warn("Supabase signOut error (ignored)", e);
+        }
+    }
   };
 
   const signIn = async (email: string) => {
