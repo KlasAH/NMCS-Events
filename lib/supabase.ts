@@ -21,11 +21,17 @@ const getEnvVar = (key: string) => {
     return '';
 };
 
-// CRITICAL FOR COOLIFY/DOCKER:
-// Vite ignores variables that do not start with VITE_.
-// We must explicitly look for VITE_SUPABASE_URL.
-let supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
-const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('VITE_SUPABASE_KEY');
+// --- CONFIGURATION ---
+// 1. Try Environment Variables (Vite/Docker)
+// 2. Fallback to Hardcoded Values (From your Project Settings)
+const ENV_URL = getEnvVar('VITE_SUPABASE_URL');
+const ENV_KEY = getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('VITE_SUPABASE_KEY');
+
+const FALLBACK_URL = 'https://pcaoooqwelvvgadjxdxb.supabase.co';
+const FALLBACK_KEY = 'sb_publishable_nF7UKNAIro7QgDs0e5g6Lg_9vw9IRuF';
+
+let supabaseUrl = ENV_URL || FALLBACK_URL;
+const supabaseAnonKey = ENV_KEY || FALLBACK_KEY;
 
 // SAFETY: Remove trailing slash if user added it in Coolify
 if (supabaseUrl && supabaseUrl.endsWith('/')) {
@@ -42,15 +48,13 @@ if (isMissingKeys) {
     );
 }
 
-// Fallback for Demo Mode if keys are missing
-// We detect "placeholder" which is sometimes set by default in templates
+// Fallback for Demo Mode if keys are completely missing (should not happen with hardcoded fallbacks)
 export const isDemoMode = isMissingKeys || supabaseUrl.includes('placeholder');
 
 export const finalUrl = isDemoMode ? 'https://placeholder.supabase.co' : supabaseUrl;
 export const finalKey = isDemoMode ? 'placeholder' : supabaseAnonKey;
 
 // Create client with standard configuration
-// Removed custom fetch wrapper to avoid hanging request issues
 export const supabase = createClient(finalUrl, finalKey, {
     auth: {
         persistSession: true,
