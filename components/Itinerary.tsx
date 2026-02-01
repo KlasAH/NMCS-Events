@@ -24,11 +24,20 @@ const mockItinerary: ItineraryItem[] = [
     { id: '6', meeting_id: '123', date: '2024-06-16', start_time: '12:00', title: 'Farewell Lunch', description: 'Beachside Grill', type: 'food' },
 ];
 
+const templateItinerary: ItineraryItem[] = [
+    { id: 't1', meeting_id: 'template-midnight-sun', date: '2025-06-21', start_time: '14:00', title: 'Check-in at Camp Ripan', description: 'Get settled in your cabins and pick up your welcome pack.', type: 'other' },
+    { id: 't2', meeting_id: 'template-midnight-sun', date: '2025-06-21', start_time: '18:00', title: 'Welcome Dinner', description: 'Traditional Lappish dinner at the main restaurant.', type: 'food' },
+    { id: 't3', meeting_id: 'template-midnight-sun', date: '2025-06-21', start_time: '23:30', title: 'Midnight Sun Drive', description: 'A guided drive to Abisko to see the sun not set.', type: 'travel' },
+    { id: 't4', meeting_id: 'template-midnight-sun', date: '2025-06-22', start_time: '10:00', title: 'Brunch', description: 'Late breakfast after the night drive.', type: 'food' },
+    { id: 't5', meeting_id: 'template-midnight-sun', date: '2025-06-22', start_time: '13:00', title: 'Scenic Route: Nikkaluokta', description: 'Drive through the valley towards Kebnekaise.', type: 'travel' },
+];
+
 const Itinerary: React.FC<ItineraryProps> = ({ meetingId }) => {
   const { data: syncedItems, isLoading } = useDataSync<ItineraryItem[]>(
       `itinerary_${meetingId}`,
       'itinerary_items',
       async () => {
+          if (meetingId === 'template-midnight-sun') return templateItinerary;
           if (isDemoMode) return mockItinerary;
           const { data, error } = await supabase
             .from('itinerary_items')

@@ -1,5 +1,5 @@
 {
-  "name": "NMCS Events",
+  "name": "NMCS Events Test",
   "description": "A modern, 3D-styled Progressive Web App for managing Motor Club events. Features a bento-grid layout, real-time itinerary updates, and dynamic event details.",
   "requestFramePermissions": []
 }

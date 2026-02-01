@@ -12,7 +12,47 @@ import SupabaseTester from '../components/SupabaseTester';
 import { useAuth } from '../context/AuthContext';
 import { useDataSync } from '../hooks/useDataSync';
 
+export const templateMeeting: Meeting = {
+    id: 'template-midnight-sun',
+    created_at: new Date().toISOString(),
+    title: 'Midnight Sun Run 2025',
+    date: '2025-06-21',
+    end_date: '2025-06-23',
+    location_name: 'Kiruna, Sweden',
+    description: 'Experience the magic of the midnight sun! Join us for an unforgettable journey through the breathtaking landscapes of northern Sweden. 24 hours of daylight, scenic driving routes, and exclusive community events. A bucket list adventure for every Mini enthusiast.',
+    cover_image_url: 'https://images.unsplash.com/photo-1531366936337-7c912a4589a7?q=80&w=2070&auto=format&fit=crop',
+    is_pinned: true,
+    status: 'published',
+    hotel_info: [{
+        name: 'Camp Ripan',
+        address: 'Campingvägen 5, 981 35 Kiruna',
+        description: 'Experience the beautiful nature of Kiruna while staying comfortably in your own cabin. Includes spa access and breakfast.',
+        map_url: 'https://goo.gl/maps/example',
+        website_url: 'https://ripan.se',
+        image_url: 'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?q=80&w=2070&auto=format&fit=crop',
+        contact: { name: 'Reception', phone: '+46 980 630 00', email: 'info@ripan.se' }
+    }],
+    parking_info: [{
+        location: 'Private Cabin Parking',
+        cost: 'Included in stay',
+        security_info: 'Open air, patrolled area',
+        map_url: 'https://goo.gl/maps/example',
+        image_url: 'https://images.unsplash.com/photo-1506521781263-d8422e82f27a?q=80&w=2070&auto=format&fit=crop'
+    }],
+    extra_info: [
+        {
+            id: 'extra-1',
+            type: 'general',
+            title: 'Packing List',
+            icon: 'info',
+            content: 'Bring warm clothes (layers), sunglasses, and your driving gloves! The sun never sets, so an eye mask for sleeping is recommended.',
+            image_url: 'https://images.unsplash.com/photo-1504198458649-3128b932f49e?q=80&w=987&auto=format&fit=crop'
+        }
+    ]
+};
+
 const mockMeetings: Meeting[] = [
+    templateMeeting,
     {
         id: '1',
         created_at: new Date().toISOString(),
@@ -58,7 +98,14 @@ const Home: React.FC = () => {
     }
   );
 
-  const meetings = meetingsData || [];
+  // Inject Template Card even in Production for demo purposes (as requested)
+  const meetings = useMemo(() => {
+      const data = meetingsData || [];
+      if (!data.some(m => m.id === templateMeeting.id)) {
+          return [templateMeeting, ...data];
+      }
+      return data;
+  }, [meetingsData]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<FilterType>('all');

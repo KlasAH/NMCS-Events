@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDataSync } from '../hooks/useDataSync';
 import sv from 'date-fns/locale/sv';
 import enGB from 'date-fns/locale/en-GB';
+import { templateMeeting } from './Home';
 
 const mockDetailMeeting: Meeting = {
     id: '1',
@@ -61,6 +62,7 @@ const EventDetails: React.FC = () => {
       `meeting_${id}`,
       'meetings',
       async () => {
+          if (id === 'template-midnight-sun') return templateMeeting;
           if (isDemoMode) return mockDetailMeeting;
           if (!id) return null;
           const { data, error } = await supabase.from('meetings').select('*').eq('id', id).single();
@@ -140,7 +142,7 @@ const EventDetails: React.FC = () => {
       e.preventDefault();
       setRegStatus('submitting');
       
-      if (isDemoMode) {
+      if (isDemoMode || id === 'template-midnight-sun') {
           setTimeout(() => { setRegStatus('success'); setIsRegistered(true); setTimeout(() => setShowRegisterModal(false), 2000) }, 1000);
           return;
       }
